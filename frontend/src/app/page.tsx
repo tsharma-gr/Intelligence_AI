@@ -60,8 +60,9 @@ export default function Home() {
     setCurrentStage("query_gen");
 
     // Establish WebSocket Connection
-    // Establish WebSocket Connection using exact production URL to prevent env var path bugs
-    const ws = new WebSocket("wss://company-intelligence-backend.onrender.com/api/ws/discovery");
+    // Establish WebSocket Connection using exact production URL to prevent env var path bugs, or localhost in development
+    const wsUrl = process.env.NODE_ENV === "development" ? "ws://127.0.0.1:8000/api/ws/discovery" : "wss://company-intelligence-backend.onrender.com/api/ws/discovery";
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       addLog("system", "Connected to discovery engine...");
