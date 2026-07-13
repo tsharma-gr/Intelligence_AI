@@ -112,6 +112,19 @@ class CompanyDiscoveryOrchestrator:
                 address = qualification.address
                 phone = qualification.phone
                 
+                # Fallback to regex if LLM missed it
+                if not phone or not address:
+                    for p in pages:
+                        if p.page_type in ("home", "contact"):
+                            if not phone:
+                                phone_match = re_search_phone(p.content)
+                                if phone_match:
+                                    phone = phone_match
+                            if not address:
+                                addr_match = re_search_address(p.content)
+                                if addr_match:
+                                    address = addr_match
+                
                 company = Company(
                     company_name=candidate.company_name,
                     website=candidate.website,
