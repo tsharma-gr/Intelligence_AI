@@ -22,6 +22,7 @@ class CompanyDiscoveryOrchestrator:
         self.on_event = on_event
         self.sheets_service = GoogleSheetsService()
         self.crawler = WebsiteCrawler(use_cache=True)
+        self.ws_lock = asyncio.Lock()
 
     async def run_discovery(
         self,
@@ -87,66 +88,73 @@ class CompanyDiscoveryOrchestrator:
             disqualified_count = 0
             skipped_count = 0  # sites that couldn't be crawled (403, timeout, etc.)
             
-            for idx, candidate in enumerate(candidates, 1):
-                prefix = f"[{idx}/{len(candidates)}] {candidate.company_name}"
-                await self._send_progress("crawl_start", f"{prefix}: Visiting website...", {"url": candidate.website})
-                
-                # Progress callback inside crawler
-                async def crawler_progress(event_type, msg):
-                    await self._send_progress("crawl_progress", f"{prefix}: {msg}", {})
+            semaphore = asyncio.Semaphore(5)
+            
+            async def process_candidate(idx: int, candidate: SearchResult):
+                nonlocal qualified_count, disqualified_count, skipped_count
+                async with semaphore:
+                    prefix = f"[{idx}/{len(candidates)}] {candidate.company_name}"
+                    await self._send_progress("crawl_start", f"{prefix}: Visiting website...", {"url": candidate.website})
+                    
+                    # Progress callback inside crawler
+                    async def crawler_progress(event_type, msg):
+                        await self._send_progress("crawl_progress", f"{prefix}: {msg}", {})
 
-                # Crawl website
-                pages = await self.crawler.crawl_company(candidate.website, on_progress=crawler_progress)
-                
-                await self._send_progress("ai_start", f"{prefix}: Running AI qualification...", {})
-                
-                # Qualify company with LLM
-                qualification = await QualificationService.qualify_company(
-                    company_name=candidate.company_name,
-                    company_type=company_type,
-                    product_or_service=product_or_service,
-                    location=location,
-                    pages=pages
-                )
-                
-                address = qualification.address
-                phone = qualification.phone
-                
-                # Fallback to regex if LLM missed it
-                if not phone or not address:
-                    for p in pages:
-                        if p.page_type in ("home", "contact"):
-                            if not phone:
-                                phone_match = re_search_phone(p.content)
-                                if phone_match:
-                                    phone = phone_match
-                            if not address:
-                                addr_match = re_search_address(p.content)
-                                if addr_match:
-                                    address = addr_match
-                
-                company = Company(
-                    company_name=candidate.company_name,
-                    website=candidate.website,
-                    address=address,
-                    phone=phone,
-                    category=product_or_service,
-                    qualification=qualification
-                )
-                
-                if not pages:
-                    skipped_count += 1
-                    await self._send_progress("crawl_skip", f"{prefix}: Skipped — website could not be accessed (blocked or timeout)", {})
-                    continue
+                    # Crawl website
+                    pages = await self.crawler.crawl_company(candidate.website, on_progress=crawler_progress)
+                    
+                    await self._send_progress("ai_start", f"{prefix}: Running AI qualification...", {})
+                    
+                    # Qualify company with LLM
+                    qualification = await QualificationService.qualify_company(
+                        company_name=candidate.company_name,
+                        company_type=company_type,
+                        product_or_service=product_or_service,
+                        location=location,
+                        pages=pages
+                    )
+                    
+                    address = qualification.address
+                    phone = qualification.phone
+                    
+                    # Fallback to regex if LLM missed it
+                    if not phone or not address:
+                        for p in pages:
+                            if p.page_type in ("home", "contact"):
+                                if not phone:
+                                    phone_match = re_search_phone(p.content)
+                                    if phone_match:
+                                        phone = phone_match
+                                if not address:
+                                    addr_match = re_search_address(p.content)
+                                    if addr_match:
+                                        address = addr_match
+                    
+                    company = Company(
+                        company_name=candidate.company_name,
+                        website=candidate.website,
+                        address=address,
+                        phone=phone,
+                        category=product_or_service,
+                        qualification=qualification
+                    )
+                    
+                    if not pages:
+                        skipped_count += 1
+                        await self._send_progress("crawl_skip", f"{prefix}: Skipped — website could not be accessed (blocked or timeout)", {})
+                        return company
 
-                processed_companies.append(company)
-                
-                if qualification.qualified:
-                    qualified_count += 1
-                    await self._send_progress("ai_qualified", f"{prefix}: QUALIFIED ({qualification.confidence}% confidence)", {"company": company.model_dump()})
-                else:
-                    disqualified_count += 1
-                    await self._send_progress("ai_disqualified", f"{prefix}: DISQUALIFIED", {"company": company.model_dump()})
+                    if qualification.qualified:
+                        qualified_count += 1
+                        await self._send_progress("ai_qualified", f"{prefix}: QUALIFIED ({qualification.confidence}% confidence)", {"company": company.model_dump()})
+                    else:
+                        disqualified_count += 1
+                        await self._send_progress("ai_disqualified", f"{prefix}: DISQUALIFIED", {"company": company.model_dump()})
+                        
+                    return company
+
+            tasks = [process_candidate(idx, candidate) for idx, candidate in enumerate(candidates, 1)]
+            processed_companies = await asyncio.gather(*tasks)
 
             # Step 4: Write to Google Sheets
             await self._send_progress("sheets_start", "Exporting results to Google Sheets...", {})
@@ -210,7 +218,8 @@ class CompanyDiscoveryOrchestrator:
             return {"error": str(e)}
 
     async def _send_progress(self, event_type: str, message: str, data: Dict[str, Any]):
-        await self.on_event(event_type, {"message": message, "data": data})
+        async with self.ws_lock:
+            await self.on_event(event_type, {"message": message, "data": data})
 
 def re_search_phone(text: str) -> Optional[str]:
     import re
