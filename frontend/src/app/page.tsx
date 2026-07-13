@@ -60,7 +60,7 @@ export default function Home() {
     setCurrentStage("query_gen");
 
     // Establish WebSocket Connection
-    const baseUrl = process.env.NEXT_PUBLIC_API_WS_URL || "ws://127.0.0.1:8000/api/ws";
+    const baseUrl = process.env.NEXT_PUBLIC_API_WS_URL || "wss://company-intelligence-backend.onrender.com/api/ws";
     const ws = new WebSocket(`${baseUrl}/discovery`);
 
     ws.onopen = () => {
