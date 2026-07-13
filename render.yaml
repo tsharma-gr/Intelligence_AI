@@ -7,6 +7,8 @@ services:
     buildCommand: "pip install -r backend/requirements.txt && playwright install chromium"
     startCommand: "uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
       - key: LLM_PROVIDER
         value: deepseek
       - key: SEARCH_PROVIDER
