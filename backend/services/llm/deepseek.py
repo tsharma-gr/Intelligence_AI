@@ -26,7 +26,7 @@ class DeepSeekService(BaseLLMService):
             "messages": messages,
             "temperature": 0.1
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(self.api_url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()

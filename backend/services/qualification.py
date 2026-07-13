@@ -69,8 +69,8 @@ class QualificationService:
             
             clean_text = clean_text.strip()
             
-            # Parse JSON
-            qual_data = json.loads(clean_text)
+            # Parse JSON with strict=False to tolerate unescaped control characters
+            qual_data = json.loads(clean_text, strict=False)
             
             # Construct and validate with Pydantic
             evidence_list = []
