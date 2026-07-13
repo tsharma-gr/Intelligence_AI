@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: company-intelligence-backend
+    env: python
+    region: frankfurt
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt && playwright install chromium --with-deps"
+    startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: LLM_PROVIDER
+        value: deepseek
+      - key: SEARCH_PROVIDER
+        value: serper
+      - key: SERPER_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_INFO
+        sync: false
+      - key: SEARCH_QUERY_COUNT
+        value: "5"
+      - key: RESULTS_PER_QUERY
+        value: "10"
+      - key: MAX_UNIQUE_COMPANIES
+        value: "50"
