@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     
     # Search Scale Configuration
     search_query_count: int = 5
-    results_per_query: int = 30
-    max_unique_companies: int = 100
+    results_per_query: int = 50
+    max_unique_companies: int = 250
     
     model_config = SettingsConfigDict(
         env_file=os.path.join(_BACKEND_DIR, ".env"),
