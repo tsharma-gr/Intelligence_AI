@@ -4,9 +4,8 @@ services:
     env: python
     region: frankfurt
     plan: free
-    rootDir: backend
-    buildCommand: "pip install -r requirements.txt && playwright install chromium"
-    startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    buildCommand: "pip install -r backend/requirements.txt && playwright install chromium"
+    startCommand: "uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: LLM_PROVIDER
         value: deepseek
