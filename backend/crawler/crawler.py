@@ -14,8 +14,8 @@ from backend.cache.cache import DomainCache
 logger = logging.getLogger("company_intelligence.crawler")
 
 # Playwright does NOT work on Windows with the default SelectorEventLoop.
-# Detect platform and disable it to avoid spammy NotImplementedError logs.
-_PLAYWRIGHT_AVAILABLE = sys.platform != "win32"
+# Also disable it if explicitly requested (e.g., on Render free tier to save memory).
+_PLAYWRIGHT_AVAILABLE = sys.platform != "win32" and os.environ.get("DISABLE_PLAYWRIGHT") != "true"
 
 class WebsiteCrawler:
     def __init__(self, use_cache: bool = True):
