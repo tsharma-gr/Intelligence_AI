@@ -109,18 +109,8 @@ class CompanyDiscoveryOrchestrator:
                     pages=pages
                 )
                 
-                # Attempt to extract contact info (phone/address) from homepage/contact pages
-                address = None
-                phone = None
-                
-                for p in pages:
-                    if p.page_type in ["home", "contact"]:
-                        phone_match = re_search_phone(p.content)
-                        if phone_match and not phone:
-                            phone = phone_match
-                        addr_match = re_search_address(p.content)
-                        if addr_match and not address:
-                            address = addr_match
+                address = qualification.address
+                phone = qualification.phone
                 
                 company = Company(
                     company_name=candidate.company_name,

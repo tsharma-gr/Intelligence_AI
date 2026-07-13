@@ -20,6 +20,8 @@ class Qualification(BaseModel):
     qualified: bool
     reason: str
     confidence: int = Field(..., ge=0, le=100)
+    address: Optional[str] = None
+    phone: Optional[str] = None
     evidence: List[Evidence] = []
 
 class Company(BaseModel):
