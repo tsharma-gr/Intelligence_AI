@@ -61,7 +61,10 @@ export default function Home() {
 
     // Establish WebSocket Connection
     // Establish WebSocket Connection using exact production URL to prevent env var path bugs, or localhost in development
-    const wsUrl = process.env.NODE_ENV === "development" ? "ws://127.0.0.1:8000/api/ws/discovery" : "wss://company-intelligence-backend.onrender.com/api/ws/discovery";
+    let wsUrl = process.env.NODE_ENV === "development" ? "ws://127.0.0.1:8000/api/ws/discovery" : "wss://company-intelligence-backend.onrender.com/api/ws/discovery";
+    if (process.env.NEXT_PUBLIC_API_URL) {
+      wsUrl = process.env.NEXT_PUBLIC_API_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws/discovery";
+    }
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

@@ -31,7 +31,7 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
     const fetchWelcome = async () => {
       try {
         setIsTyping(true);
-        const apiUrl = process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api";
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api");
         const res = await fetch(`${apiUrl}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -68,7 +68,7 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
     setIsTyping(true);
 
     try {
-      const apiUrl = process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api");
       const res = await fetch(`${apiUrl}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -14,16 +14,20 @@ class ContentExtractor:
         if not html_content:
             return ""
             
-        soup = BeautifulSoup(html_content, "html.parser")
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+        except Exception as e:
+            logger.error(f"Failed to parse HTML in extractor: {e}")
+            return ""
         
-        # Remove structural tags that don't contain core page content
-        tags_to_remove = ["script", "style", "noscript", "header", "footer", "nav", "aside", "svg", "iframe", "form"]
+        # Remove structural tags that are purely noise
+        tags_to_remove = ["script", "style", "noscript", "svg", "iframe", "form"]
         for tag in soup.find_all(tags_to_remove):
             tag.decompose()
             
-        # Select common boilerplate classes / IDs to remove (cookie banners, menus, footers)
+        # Select common boilerplate classes / IDs to remove (cookie banners, menus)
         boilerplate_pattern = re.compile(
-            r"cookie|consent|banner|footer|header|menu|nav|sidebar|social|share|widget|advert|popup|modal|banner", 
+            r"cookie|consent|banner|menu|social|share|widget|advert|popup|modal", 
             re.IGNORECASE
         )
         
