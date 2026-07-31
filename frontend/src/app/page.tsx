@@ -88,8 +88,14 @@ export default function Home() {
         setCurrentStage("search");
       } else if (type === "crawl_start" || type === "crawl_progress" || type === "page_extracted") {
         setCurrentStage("crawl");
-      } else if (type === "ai_start" || type === "ai_qualified" || type === "ai_disqualified") {
+      } else if (type === "ai_start") {
         setCurrentStage("ai");
+      } else if (type === "ai_qualified" || type === "ai_disqualified") {
+        setCurrentStage("ai");
+        if (data.company) {
+          setCompanies(prev => [...prev, data.company]);
+          setViewState("results");
+        }
       } else if (type === "sheets_start") {
         setCurrentStage("sheets");
       } else if (type === "completed") {
@@ -209,22 +215,32 @@ export default function Home() {
         )}
 
         {/* VIEW 3: Final Reports & Tables Dashboard */}
-        {viewState === "results" && summary && (
+        {viewState === "results" && (
           <div className="space-y-8 w-full animate-fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
               <div>
                 <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
                   <Layers className="text-blue-400" size={20} />
-                  <span>Discovery Results Summary</span>
+                  <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
                 </h2>
                 <p className="text-xs text-zinc-500 mt-1">
-                  Export complete. All logs and tables successfully stored in Google Sheets.
+                  {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
                 </p>
               </div>
             </div>
 
             {/* KPI Cards */}
-            <ExecutionSummary summary={summary} searchId={searchId} />
+            {summary ? (
+              <ExecutionSummary summary={summary} searchId={searchId} />
+            ) : (
+              <div className="p-6 border border-blue-500/30 bg-blue-500/5 rounded-2xl flex items-center gap-4 animate-pulse">
+                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <div>
+                  <h3 className="text-sm font-bold text-blue-400">AI Qualification in Progress...</h3>
+                  <p className="text-xs text-zinc-400">Companies will appear below as soon as they are evaluated. Final metrics will compile here once finished.</p>
+                </div>
+              </div>
+            )}
 
             {/* Split Tables tabbed list */}
             <ResultsTable companies={companies} />
