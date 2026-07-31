@@ -25,10 +25,21 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     
+    # Production Settings
+    sentry_dsn: Optional[str] = None
+    redis_url: str = "redis://localhost:6379"
+    
     # Search Scale Configuration
     search_query_count: int = 5
     results_per_query: int = 50
     max_unique_companies: int = 250
+
+    # Decoupled Pipeline Scaling & Browser Pool
+    max_browsers: int = 2
+    max_contexts_per_browser: int = 10
+    max_crawl_workers: int = 20
+    max_ai_workers: int = 50
+    auto_scale_workers: bool = False
     
     model_config = SettingsConfigDict(
         env_file=os.path.join(_BACKEND_DIR, ".env"),

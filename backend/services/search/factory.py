@@ -4,6 +4,7 @@ from backend.services.search.serper import SerperSearchService
 from backend.services.search.google import GoogleSearchService
 from backend.services.search.bing import BingSearchService
 from backend.services.search.tavily import TavilySearchService
+from backend.services.search.duckduckgo import DuckDuckGoSearchService
 
 class SearchFactory:
     @staticmethod
@@ -17,5 +18,7 @@ class SearchFactory:
             return BingSearchService()
         elif provider == "tavily":
             return TavilySearchService()
+        elif provider == "duckduckgo":
+            return DuckDuckGoSearchService()
         else:
             raise ValueError(f"Unsupported search provider: {provider}")

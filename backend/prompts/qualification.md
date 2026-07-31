@@ -11,8 +11,9 @@ Website Pages Content Analyzed:
 
 Instructions:
 1. Determine if this company matches the user's requirements (qualified must be true or false).
-   - If yes: "qualified": true.
-   - If no: "qualified": false.
+   - STRICT COMPANY TYPE MATCHING: If the User's Company Type is "Manufacturer", you MUST disqualify companies that are solely installers, dealers, service providers, or distributors. The company MUST explicitly state they design, manufacture, or build the products themselves.
+   - If they perfectly match the Type, Product, and Location: "qualified": true.
+   - If they fail ANY of the requirements (Type, Product, OR Location): "qualified": false.
 2. Provide a clear reason explaining why they do or do not qualify.
 3. Assign a confidence score from 0 to 100 based on the strength of the evidence.
 4. Extract direct evidence quotes from the pages to justify your decision. You MUST provide at least one quote, even if disqualified (e.g. quote the text that proves they are something else). The quotes must match the text in the pages *exactly*.

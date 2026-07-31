@@ -1,6 +1,7 @@
 import json
+from json_repair import repair_json
 import logging
-from typing import List
+from typing import List, Optional, Any
 from backend.models.company import Qualification, Evidence
 from backend.crawler.models import CrawledPage
 from backend.services.llm.factory import LLMFactory
@@ -15,7 +16,8 @@ class QualificationService:
         company_type: str,
         product_or_service: str,
         location: str,
-        pages: List[CrawledPage]
+        pages: List[CrawledPage],
+        job: Optional[Any] = None
     ) -> Qualification:
         """
         Qualifies a company by sending its page text contents to the LLM
@@ -53,7 +55,8 @@ class QualificationService:
             # Request LLM
             response_text = await llm.generate_response(
                 prompt=formatted_prompt,
-                system_instruction=f"You are an AI auditor qualifying the company '{company_name}' based on specific criteria. Output JSON only."
+                system_instruction=f"You are an AI auditor qualifying the company '{company_name}' based on specific criteria. Output JSON only.",
+                job=job
             )
             
             # Clean response text if it has markdown formatting
@@ -69,8 +72,11 @@ class QualificationService:
             
             clean_text = clean_text.strip()
             
-            # Parse JSON with strict=False to tolerate unescaped control characters
-            qual_data = json.loads(clean_text, strict=False)
+            # Auto-repair broken/truncated JSON from the AI (e.g. unterminated strings, missing quotes)
+            import re
+            clean_text = re.sub(r'\\u(?![0-9a-fA-F]{4})', r'\\\\u', clean_text)
+            repaired_text = repair_json(clean_text, return_objects=False)
+            qual_data = json.loads(repaired_text, strict=False)
             
             # Construct and validate with Pydantic
             evidence_list = []

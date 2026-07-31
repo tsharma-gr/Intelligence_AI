@@ -10,3 +10,12 @@ google-api-python-client>=2.120.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
 python-dotenv>=1.0.0
+json-repair>=0.61.0
+duckduckgo-search>=8.0.0
+ddgs>=9.0.0
+
+# Production Additions
+sentry-sdk[fastapi]>=1.40.0
+slowapi>=0.1.9
+redis>=5.0.0
+arq>=0.25.0

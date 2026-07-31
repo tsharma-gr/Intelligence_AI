@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Any
 
 # Global token usage tracker shared across all LLM calls in a session
 token_usage = {
@@ -18,6 +18,6 @@ def reset_token_usage():
 
 class BaseLLMService(ABC):
     @abstractmethod
-    async def generate_response(self, prompt: str, system_instruction: Optional[str] = None) -> str:
+    async def generate_response(self, prompt: str, system_instruction: Optional[str] = None, job: Optional[Any] = None) -> str:
         """Generate response from the LLM provider."""
         pass

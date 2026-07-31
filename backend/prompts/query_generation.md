@@ -8,6 +8,7 @@ Requirements:
 
 Guidelines:
 - Create search queries that target direct company websites, not news portals or directories if possible.
+- IMPORTANT: Generate highly diverse queries! Explore different angles, specific sub-niches, or different regions within the target location to minimize duplicate search results.
 - Vary the terms (e.g., if product is "Forklift Trucks", use "Forklift Trucks", "Forklifts", "Material Handling Equipment").
 - Use company type indicators (e.g., "manufacturer", "supplier", "distributor", "service", "company", "installer").
 - Include the location in all queries.
@@ -16,11 +17,9 @@ Guidelines:
 Output format:
 ```json
 [
-  "Query 1",
-  "Query 2",
-  "Query 3",
-  "Query 4",
-  "Query 5"
+  "Example Query 1",
+  "Example Query 2",
+  "..."
 ]
 ```
 Do not include any explanation, intro, or other text outside the JSON block.

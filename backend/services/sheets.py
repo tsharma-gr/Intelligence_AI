@@ -11,6 +11,7 @@ from backend.models.company import Company, SearchHistory
 
 logger = logging.getLogger("company_intelligence.sheets")
 
+
 class GoogleSheetsService:
     def __init__(self):
         self.creds = self._get_credentials()
@@ -24,7 +25,6 @@ class GoogleSheetsService:
             logger.warning("No Google Sheets credentials provided. Running in LOCAL CSV/JSON fallback mode.")
 
     def _get_credentials(self) -> Optional[service_account.Credentials]:
-        # Try loading inline credentials info first
         if settings.google_service_account_info:
             try:
                 info = json.loads(settings.google_service_account_info)
@@ -34,7 +34,6 @@ class GoogleSheetsService:
             except Exception as e:
                 logger.error(f"Failed to load credentials from GOOGLE_SERVICE_ACCOUNT_INFO: {e}")
 
-        # Try loading service account path next
         if settings.resolved_service_account_json:
             if os.path.exists(settings.resolved_service_account_json):
                 try:
@@ -50,7 +49,6 @@ class GoogleSheetsService:
         return None
 
     def _create_spreadsheet(self) -> str:
-        """Create a new spreadsheet with the correct worksheets and headers."""
         if not self.service:
             return ""
             
@@ -72,7 +70,6 @@ class GoogleSheetsService:
             sheet_id = response.get('spreadsheetId')
             logger.info(f"Created new spreadsheet with ID: {sheet_id}")
             
-            # Populate headers
             self._write_headers(sheet_id)
             return sheet_id
         except Exception as e:
@@ -80,7 +77,6 @@ class GoogleSheetsService:
             return ""
 
     def _write_headers(self, sheet_id: str):
-        """Writes headers to the respective sheets."""
         headers = {
             "'Execution Summary'!A1:F1": [["Search Date", "Search ID", "Total Companies", "Qualified", "Disqualified", "Duration"]],
             "'Search History'!A1:E1": [["Search Date", "Search ID", "Company Type", "Product", "Location"]],
@@ -98,25 +94,86 @@ class GoogleSheetsService:
                 body=body
             ).execute()
 
-    def write_results(
-        self,
-        history: SearchHistory,
-        companies: List[Company],
-        summary: Dict[str, Any]
-    ):
-        """Main method to export results to Google Sheets, falling back to local files if auth is missing."""
+    def resolve_sheet_id(self) -> str:
+        """Resolve sheet_id from config settings or create a new sheet."""
         if not self.service:
-            self._write_to_local_fallback(history, companies, summary)
+            return "local_fallback"
+        sheet_id = settings.google_sheet_id or self._create_spreadsheet()
+        return sheet_id or "local_fallback"
+
+    def write_search_history(self, sheet_id: str, history: SearchHistory):
+        """Streaming Stage: Save search history metadata to sheets."""
+        if sheet_id == "local_fallback" or not self.service:
+            return
+        
+        try:
+            history_row = [[
+                history.timestamp,
+                history.search_id,
+                history.company_type,
+                history.product,
+                history.location
+            ]]
+            self._append_row(sheet_id, "'Search History'!A:E", history_row)
+        except Exception as e:
+            logger.error(f"Failed to write history metadata to sheets: {e}")
+
+    def append_companies_batch(self, sheet_id: str, history: SearchHistory, companies: List[Company]):
+        """Streaming Stage: Append a batch of parsed and qualified companies."""
+        if sheet_id == "local_fallback" or not self.service:
+            # Local fallback handles everything at the end
             return
 
-        sheet_id = settings.google_sheet_id or self._create_spreadsheet()
-        if not sheet_id:
-            logger.error("No Sheet ID resolved. Saving locally.")
-            self._write_to_local_fallback(history, companies, summary)
+        qualified_rows = []
+        disqualified_rows = []
+        
+        for c in companies:
+            if not c.qualification:
+                continue
+                
+            q = c.qualification
+            evidence_text = "; ".join([e.quote for e in q.evidence]) if q.evidence else "None"
+            source_pages = "; ".join([e.page for e in q.evidence]) if q.evidence else "None"
+            
+            if q.qualified:
+                qualified_rows.append([
+                    history.timestamp,
+                    history.search_id,
+                    c.company_name,
+                    c.website,
+                    c.address or "N/A",
+                    c.phone or "N/A",
+                    c.category or "N/A",
+                    q.reason,
+                    evidence_text,
+                    source_pages,
+                    f"{q.confidence}%"
+                ])
+            else:
+                disqualified_rows.append([
+                    history.timestamp,
+                    history.search_id,
+                    c.company_name,
+                    c.website,
+                    q.reason,
+                    evidence_text,
+                    source_pages
+                ])
+
+        try:
+            if qualified_rows:
+                self._append_row(sheet_id, "'Qualified Companies'!A:K", qualified_rows)
+            if disqualified_rows:
+                self._append_row(sheet_id, "'Disqualified Companies'!A:G", disqualified_rows)
+        except Exception as e:
+            logger.error(f"Failed to write batch to sheets: {e}")
+
+    def write_results_summary(self, sheet_id: str, history: SearchHistory, summary: Dict[str, Any]):
+        """Streaming Stage: Final log write summarizing run metrics."""
+        if sheet_id == "local_fallback" or not self.service:
             return
 
         try:
-            # 1. Execution Summary row
             summary_row = [[
                 history.timestamp,
                 history.search_id,
@@ -125,54 +182,6 @@ class GoogleSheetsService:
                 summary.get("disqualified_count", 0),
                 summary.get("duration", "0s")
             ]]
-            
-            # 2. Search History row
-            history_row = [[
-                history.timestamp,
-                history.search_id,
-                history.company_type,
-                history.product,
-                history.location
-            ]]
-            
-            # 3. Qualified & Disqualified rows
-            qualified_rows = []
-            disqualified_rows = []
-            
-            for c in companies:
-                if not c.qualification:
-                    continue
-                    
-                q = c.qualification
-                evidence_text = "; ".join([e.quote for e in q.evidence]) if q.evidence else "None"
-                source_pages = "; ".join([e.page for e in q.evidence]) if q.evidence else "None"
-                
-                if q.qualified:
-                    qualified_rows.append([
-                        history.timestamp,
-                        history.search_id,
-                        c.company_name,
-                        c.website,
-                        c.address or "N/A",
-                        c.phone or "N/A",
-                        c.category or "N/A",
-                        q.reason,
-                        evidence_text,
-                        source_pages,
-                        f"{q.confidence}%"
-                    ])
-                else:
-                    disqualified_rows.append([
-                        history.timestamp,
-                        history.search_id,
-                        c.company_name,
-                        c.website,
-                        q.reason,
-                        evidence_text,
-                        source_pages
-                    ])
-
-            # 4. Logs row
             log_row = [[
                 history.timestamp,
                 history.search_id,
@@ -181,23 +190,27 @@ class GoogleSheetsService:
                 summary.get("duration", "0s"),
                 summary.get("errors", "")
             ]]
-
-            # Append to worksheets
+            
             self._append_row(sheet_id, "'Execution Summary'!A:F", summary_row)
-            self._append_row(sheet_id, "'Search History'!A:E", history_row)
-            
-            if qualified_rows:
-                self._append_row(sheet_id, "'Qualified Companies'!A:K", qualified_rows)
-            if disqualified_rows:
-                self._append_row(sheet_id, "'Disqualified Companies'!A:G", disqualified_rows)
-                
             self._append_row(sheet_id, "'Execution Logs'!A:F", log_row)
-            
-            logger.info("Successfully updated Google Sheets!")
-            
         except Exception as e:
-            logger.exception("Error appending data to Google Sheets, saving locally.")
+            logger.error(f"Failed to append final summary to sheets: {e}")
+
+    def write_results(
+        self,
+        history: SearchHistory,
+        companies: List[Company],
+        summary: Dict[str, Any]
+    ):
+        """Main method (Backward compatible legacy API). Writes everything at the end."""
+        sheet_id = self.resolve_sheet_id()
+        if sheet_id == "local_fallback":
             self._write_to_local_fallback(history, companies, summary)
+            return
+
+        self.write_search_history(sheet_id, history)
+        self.append_companies_batch(sheet_id, history, companies)
+        self.write_results_summary(sheet_id, history, summary)
 
     def _append_row(self, sheet_id: str, range_name: str, values: List[List[Any]]):
         body = {'values': values}
@@ -215,7 +228,6 @@ class GoogleSheetsService:
         companies: List[Company],
         summary: Dict[str, Any]
     ):
-        """Saves search logs and results inside a local JSON file when sheets is unavailable."""
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../data"))
         os.makedirs(data_dir, exist_ok=True)
         

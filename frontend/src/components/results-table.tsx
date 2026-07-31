@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { ExternalLink, ShieldCheck, ShieldAlert, Award, FileText, ChevronRight, X } from "lucide-react";
+import { ExternalLink, ShieldCheck, ShieldAlert, Award, FileText, ChevronRight, X, Download } from "lucide-react";
 
 export interface Evidence {
   page: string;
@@ -37,10 +37,43 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
 
   const displayList = activeTab === "qualified" ? qualifiedList : disqualifiedList;
 
+  const handleExportCSV = () => {
+    if (displayList.length === 0) return;
+
+    // Define CSV Headers
+    const headers = ["Company Name", "Website", "Status", "Confidence", "Phone", "Address", "Reason"];
+    
+    // Create CSV Rows
+    const rows = displayList.map(c => {
+      return [
+        `"${c.company_name.replace(/"/g, '""')}"`,
+        `"${c.website}"`,
+        `"${c.qualification.qualified ? 'Qualified' : 'Disqualified'}"`,
+        `"${c.qualification.confidence}%"`,
+        `"${c.phone || ''}"`,
+        `"${(c.address || '').replace(/"/g, '""')}"`,
+        `"${c.qualification.reason.replace(/"/g, '""')}"`
+      ].join(",");
+    });
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    
+    link.setAttribute("href", url);
+    link.setAttribute("download", `company-intelligence-${activeTab}-results.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in relative">
-      {/* Tab Selectors */}
-      <div className="flex border-b border-white/5">
+      {/* Tab Selectors & Action Buttons */}
+      <div className="flex justify-between border-b border-white/5">
+        <div className="flex">
+
         <button
           onClick={() => {
             setActiveTab("qualified");
@@ -69,6 +102,19 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
           <ShieldAlert size={16} />
           <span>Disqualified ({disqualifiedList.length})</span>
         </button>
+        </div>
+        
+        {/* Export Button */}
+        <div className="flex items-center px-4">
+          <button 
+            onClick={handleExportCSV}
+            disabled={displayList.length === 0}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download size={14} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -152,8 +198,8 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                 <X size={16} />
               </button>
 
-              <div className="space-y-1 pr-6">
-                <h3 className="text-lg font-bold text-zinc-100">{selectedCompany.company_name}</h3>
+              <div className="space-y-1 pr-12">
+                <h3 className="text-lg font-bold text-zinc-100 break-words">{selectedCompany.company_name}</h3>
                 <a
                   href={selectedCompany.website}
                   target="_blank"

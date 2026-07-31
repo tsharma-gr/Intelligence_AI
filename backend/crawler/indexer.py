@@ -25,7 +25,11 @@ class WebsiteIndexer:
         parsed_root = urlparse(root_url)
         base_domain = parsed_root.netloc
         
-        soup = BeautifulSoup(html_content, "html.parser")
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+        except Exception as e:
+            logger.error(f"Failed to parse HTML in indexer: {e}")
+            return discovered
         anchors = soup.find_all("a", href=True)
         
         seen_links: Dict[str, Set[str]] = {key: set() for key in WebsiteIndexer.PATTERNS.keys()}

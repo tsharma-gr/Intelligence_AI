@@ -21,42 +21,48 @@ class SerperSearchService(BaseSearchService):
             "X-API-KEY": self.api_key,
             "Content-Type": "application/json"
         }
-        
-        payload = {
-            "q": query,
-            "num": num_results
-        }
-        
         try:
+            results = []
+            pages_to_fetch = max(1, num_results // 10)
+            
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(self.api_url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                
-                organic_results = data.get("organic", [])
-                results = []
-                
-                for item in organic_results:
-                    link = item.get("link", "")
-                    if not link:
-                        continue
+                for page in range(1, pages_to_fetch + 1):
+                    payload = {
+                        "q": query,
+                        "page": page
+                    }
+                    response = await client.post(self.api_url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    organic_results = data.get("organic", [])
+                    if not organic_results:
+                        break # Stop if no more results
                         
-                    # Deduce a neat fallback company name from website title or hostname
-                    title = item.get("title", "")
-                    snippet = item.get("snippet", "")
+                    for item in organic_results:
+                        link = item.get("link", "")
+                        if not link:
+                            continue
+                            
+                        # Deduce a neat fallback company name from website title or hostname
+                        title = item.get("title", "")
+                        snippet = item.get("snippet", "")
+                        
+                        parsed_url = urlparse(link)
+                        domain = parsed_url.netloc
+                        company_name = domain.replace("www.", "").split(".")[0].capitalize()
+                        
+                        results.append(SearchResult(
+                            company_name=company_name,
+                            website=link,
+                            title=title,
+                            snippet=snippet
+                        ))
                     
-                    parsed_url = urlparse(link)
-                    domain = parsed_url.netloc
-                    company_name = domain.replace("www.", "").split(".")[0].capitalize()
-                    
-                    results.append(SearchResult(
-                        company_name=company_name,
-                        website=link,
-                        title=title,
-                        snippet=snippet
-                    ))
-                    
-                return results
+                    if len(results) >= num_results:
+                        break
+                        
+                return results[:num_results]
                 
         except Exception as e:
             logger.exception(f"Error calling Serper API for query '{query}'")

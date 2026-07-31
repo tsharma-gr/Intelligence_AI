@@ -1,15 +1,39 @@
 import re
 import json
 import logging
+import sys
+import asyncio
+import uuid
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import sentry_sdk
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import redis.asyncio as redis_async
+from arq import create_pool
+from arq.connections import RedisSettings
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from backend.api.config import settings
 from backend.services.llm.factory import LLMFactory
 from backend.services.orchestrator import CompanyDiscoveryOrchestrator
 from backend.prompts import load_prompt
+
+# Initialize Sentry
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+    )
+
+# Initialize Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +47,10 @@ app = FastAPI(
     description="Backend API for AI-powered Company Discovery & Qualification Platform",
     version="1.0.0"
 )
+
+# Add Rate Limiter Exception Handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Enable CORS for Next.js frontend
 app.add_middleware(
@@ -51,18 +79,19 @@ def health_check():
     return {"status": "ok", "provider": settings.llm_provider}
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+@limiter.limit("5/minute")
+async def chat_endpoint(request: Request, chat_req: ChatRequest):
     try:
         # Load the chat prompt template
         chat_prompt = load_prompt("chat.md")
         
         # Get the latest message and formatting history
-        if not request.messages:
+        if not chat_req.messages:
             welcome_text = "Welcome to Company Intelligence AI.\nI'll help you discover and qualify companies that match your requirements.\nLet's start by understanding what you're looking for.\n\nWhat type of company are you looking for?\nExamples:\n• Manufacturer\n• Distributor\n• Dealer\n• Service Provider"
             return ChatResponse(content=welcome_text, ready=False)
             
-        latest_message = request.messages[-1].content
-        history_msgs = request.messages[:-1]
+        latest_message = chat_req.messages[-1].content
+        history_msgs = chat_req.messages[:-1]
         
         history_str = ""
         for msg in history_msgs:

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import List
+from typing import List, Optional, Any
 from backend.services.llm.factory import LLMFactory
 from backend.prompts import load_prompt
 from backend.api.config import settings
@@ -9,7 +9,7 @@ logger = logging.getLogger("company_intelligence.query_generator")
 
 class QueryGeneratorService:
     @staticmethod
-    async def generate_queries(company_type: str, product_or_service: str, location: str) -> List[str]:
+    async def generate_queries(company_type: str, product_or_service: str, location: str, job: Optional[Any] = None) -> List[str]:
         """
         Generates search query variations based on the user's requirements and configured limits.
         """
@@ -31,7 +31,8 @@ class QueryGeneratorService:
             # Request LLM
             response_text = await llm.generate_response(
                 prompt=formatted_prompt,
-                system_instruction="You are an AI that generates search engine queries from user search profiles. Output JSON array of strings only."
+                system_instruction="You are an AI that generates search engine queries from user search profiles. Output JSON array of strings only.",
+                job=job
             )
             
             # Clean response text if it has markdown formatting
