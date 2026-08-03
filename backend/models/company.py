@@ -21,6 +21,7 @@ class Qualification(BaseModel):
     is_blocked: bool = False
     reason: str
     confidence: int = Field(..., ge=0, le=100)
+    corrected_company_name: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     evidence: List[Evidence] = []

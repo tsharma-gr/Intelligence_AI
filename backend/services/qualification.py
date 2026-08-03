@@ -90,6 +90,7 @@ class QualificationService:
                 qualified=bool(qual_data.get("qualified", False)),
                 reason=str(qual_data.get("reason", "No reason provided.")),
                 confidence=int(qual_data.get("confidence", 50)),
+                corrected_company_name=qual_data.get("corrected_company_name"),
                 evidence=evidence_list
             )
             

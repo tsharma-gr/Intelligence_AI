@@ -331,7 +331,7 @@ class CompanyDiscoveryOrchestrator:
                                         address = re_search_address(p.content) or address
                         
                         company = Company(
-                            company_name=candidate.company_name,
+                            company_name=qualification.corrected_company_name or candidate.company_name,
                             website=candidate.website,
                             address=address,
                             phone=phone,
