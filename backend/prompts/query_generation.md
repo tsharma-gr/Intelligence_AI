@@ -12,6 +12,7 @@ Guidelines:
 - Vary the terms (e.g., if product is "Forklift Trucks", use "Forklift Trucks", "Forklifts", "Material Handling Equipment").
 - Use company type indicators (e.g., "manufacturer", "supplier", "distributor", "service", "company", "installer").
 - Include the location in all queries.
+- GEOGRAPHIC DISAMBIGUATION: If the provided Location implies a specific country, you MUST ensure that country name is included in your search queries (e.g. if Location is 'Kent, UK', generate queries like 'Contract Cleaners Kent UK' instead of just 'Contract Cleaners Kent').
 - Format your response strictly as a JSON list of strings.
 
 Output format:
