@@ -9,6 +9,7 @@ interface SummaryData {
   total_processed: number;
   qualified_count: number;
   disqualified_count: number;
+  blocked_count?: number;
   duration: string;
   errors?: string;
 }
@@ -39,6 +40,12 @@ export default function ExecutionSummary({ summary, searchId }: ExecutionSummary
       bg: "bg-zinc-800/10 border-white/5"
     },
     {
+      label: "Blocked / Bot Protected",
+      value: summary.blocked_count || 0,
+      icon: <XCircle className="text-orange-500" size={20} />,
+      bg: "bg-orange-500/5 border-orange-500/10"
+    },
+    {
       label: "Execution Duration",
       value: summary.duration,
       icon: <Clock className="text-purple-400" size={20} />,
@@ -62,7 +69,7 @@ export default function ExecutionSummary({ summary, searchId }: ExecutionSummary
       </div>
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {cards.map((card, index) => (
           <div key={index} className={`p-5 rounded-2xl border flex flex-col justify-between ${card.bg} shadow-md`}>
             <div className="flex items-center justify-between mb-2">

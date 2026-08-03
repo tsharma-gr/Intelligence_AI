@@ -10,6 +10,7 @@ export interface Evidence {
 
 export interface Qualification {
   qualified: boolean;
+  is_blocked?: boolean;
   reason: string;
   confidence: number;
   evidence: Evidence[];
@@ -29,13 +30,14 @@ interface ResultsTableProps {
 }
 
 export default function ResultsTable({ companies }: ResultsTableProps) {
-  const [activeTab, setActiveTab] = useState<"qualified" | "disqualified">("qualified");
+  const [activeTab, setActiveTab] = useState<"qualified" | "disqualified" | "blocked">("qualified");
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 
   const qualifiedList = companies.filter((c) => c.qualification?.qualified === true);
-  const disqualifiedList = companies.filter((c) => c.qualification?.qualified === false);
+  const blockedList = companies.filter((c) => c.qualification?.is_blocked === true);
+  const disqualifiedList = companies.filter((c) => c.qualification?.qualified === false && !c.qualification?.is_blocked);
 
-  const displayList = activeTab === "qualified" ? qualifiedList : disqualifiedList;
+  const displayList = activeTab === "qualified" ? qualifiedList : activeTab === "blocked" ? blockedList : disqualifiedList;
 
   const handleExportCSV = () => {
     if (displayList.length === 0) return;
@@ -101,6 +103,20 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
         >
           <ShieldAlert size={16} />
           <span>Disqualified ({disqualifiedList.length})</span>
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab("blocked");
+            setSelectedCompany(null);
+          }}
+          className={`px-6 py-3 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === "blocked"
+              ? "border-orange-500 text-orange-400"
+              : "border-transparent text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <ShieldAlert size={16} />
+          <span>Blocked ({blockedList.length})</span>
         </button>
         </div>
         

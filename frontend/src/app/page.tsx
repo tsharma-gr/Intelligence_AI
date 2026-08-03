@@ -90,7 +90,7 @@ export default function Home() {
         setCurrentStage("crawl");
       } else if (type === "ai_start") {
         setCurrentStage("ai");
-      } else if (type === "ai_qualified" || type === "ai_disqualified") {
+      } else if (type === "ai_qualified" || type === "ai_disqualified" || type === "ai_blocked") {
         setCurrentStage("ai");
         if (data.company) {
           setCompanies(prev => [...prev, data.company]);

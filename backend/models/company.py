@@ -18,6 +18,7 @@ class Evidence(BaseModel):
 
 class Qualification(BaseModel):
     qualified: bool
+    is_blocked: bool = False
     reason: str
     confidence: int = Field(..., ge=0, le=100)
     address: Optional[str] = None
@@ -31,6 +32,7 @@ class Company(BaseModel):
     phone: Optional[str] = None
     category: Optional[str] = None
     qualification: Optional[Qualification] = None
+    is_blocked: bool = False
 
 class SearchHistory(BaseModel):
     search_id: str

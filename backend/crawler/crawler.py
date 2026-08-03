@@ -11,6 +11,9 @@ from backend.crawler.indexer import WebsiteIndexer
 from backend.crawler.extractor import ContentExtractor
 from backend.cache.cache import DomainCache
 
+class BotProtectionError(Exception):
+    pass
+
 logger = logging.getLogger("company_intelligence.crawler")
 
 _PLAYWRIGHT_AVAILABLE = os.environ.get("DISABLE_PLAYWRIGHT") != "true"
@@ -193,8 +196,14 @@ class WebsiteCrawler:
         else:
             clean_text = ContentExtractor.extract_clean_text(html)
             clean_text_lower = clean_text.lower()
-            if len(clean_text) < 150 or "enable javascript" in clean_text_lower or "please enable js" in clean_text_lower or "just a moment" in clean_text_lower:
-                logger.info(f"HTTPX returned empty/JS-shell or bot-protection for '{url}', triggering Playwright fallback")
+            
+            # Check for Cloudflare/Bot protection immediately on HTTPX fast path
+            if any(hint in clean_text_lower for hint in ["just a moment", "verify you are human", "checking your browser", "enable javascript", "please enable js", "cloudflare", "attention required"]):
+                logger.warning(f"Bot protection detected on HTTPX fetch for '{url}'")
+                raise BotProtectionError(f"Bot protection active on {url}")
+                
+            if len(clean_text) < 150:
+                logger.info(f"HTTPX returned empty or shell for '{url}', triggering Playwright fallback")
                 needs_playwright = True
 
         if not needs_playwright:
@@ -219,11 +228,21 @@ class WebsiteCrawler:
                     try:
                         await page.goto(url, wait_until="domcontentloaded", timeout=12000)
                         html = await page.content()
+                        
+                        # Post-render bot protection check
+                        if html:
+                            clean_pw_text = ContentExtractor.extract_clean_text(html).lower()
+                            if any(hint in clean_pw_text for hint in ["just a moment", "verify you are human", "checking your browser", "attention required"]):
+                                logger.warning(f"Bot protection detected on Playwright fetch for '{url}'")
+                                raise BotProtectionError(f"Bot protection active on {url}")
+                        
                         return html
                     finally:
                         # Close only the page, the context remains active in the pool
                         await page.close()
 
+            except BotProtectionError:
+                raise
             except Exception as e:
                 logger.error(f"Playwright fallback fetch failed for '{url}': {e}")
 

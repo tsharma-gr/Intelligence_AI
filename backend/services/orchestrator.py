@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from backend.models.company import Company, SearchHistory, SearchResult
 from backend.services.query_generator import QueryGeneratorService
 from backend.services.search.factory import SearchFactory
-from backend.crawler.crawler import WebsiteCrawler
+from backend.crawler.crawler import WebsiteCrawler, BotProtectionError
 from backend.services.qualification import QualificationService
 from backend.services.sheets import GoogleSheetsService
 from backend.services.llm.base import token_usage, reset_token_usage
@@ -115,6 +115,9 @@ class CompanyDiscoveryOrchestrator:
             
             async def search_worker(query: str, worker_idx: int):
                 nonlocal consecutive_search_failures
+                # Stagger the start time of each worker to prevent Serper 429 Rate Limit Errors
+                await asyncio.sleep(worker_idx * 0.5)
+                
                 try:
                     await self._send_progress(job.job_id, "search_progress", f"Searching variation {worker_idx}: '{query}'", {})
                     
@@ -251,6 +254,22 @@ class CompanyDiscoveryOrchestrator:
                         nonlocal ai_queue_counter
                         ai_queue_counter += 1
                         await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
+                    except BotProtectionError as e:
+                        logger.warning(f"Bot protection blocked {candidate.website}")
+                        
+                        from backend.models.company import Qualification
+                        blocked_company = Company(
+                            company_name=candidate.company_name,
+                            website=candidate.website,
+                            qualification=Qualification(qualified=False, is_blocked=True, reason="Blocked by Cloudflare/Anti-Bot Protection", confidence=0),
+                            is_blocked=True
+                        )
+                        
+                        await self.result_store.save_company(job.job_id, blocked_company.model_dump())
+                        job.results.append(blocked_company.model_dump())
+                        job.update_metrics("blocked_count", 1, add=True)
+                        await self._send_progress(job.job_id, "ai_blocked", f"{prefix}: BLOCKED by Anti-Bot", {"company": blocked_company.model_dump()})
+                        
                     except Exception as e:
                         logger.error(f"Crawl worker {worker_id} failed on {candidate.website}: {e}")
                         job.update_metrics("skipped_count", 1, add=True)
@@ -417,6 +436,7 @@ class CompanyDiscoveryOrchestrator:
                 "total_processed": len(job.results),
                 "qualified_count": job.metrics["qualified_count"],
                 "disqualified_count": job.metrics["disqualified_count"],
+                "blocked_count": job.metrics.get("blocked_count", 0),
                 "skipped_count": job.metrics["skipped_count"],
                 "duration": duration_str,
                 "timings": {
