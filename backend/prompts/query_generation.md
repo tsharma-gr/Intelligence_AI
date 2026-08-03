@@ -9,6 +9,7 @@ Requirements:
 Guidelines:
 - Create search queries that target direct company websites, not news portals or directories if possible.
 - IMPORTANT: Generate highly diverse queries! Explore different angles, specific sub-niches, or different regions within the target location to minimize duplicate search results.
+- ACRONYM EXPANSION: If the User's Product or Service includes an industry acronym (e.g., 'KBB', 'HVAC', 'SaaS'), you MUST expand it into its full descriptive meaning (e.g., 'Kitchen Bedroom Bathroom furniture', 'Heating Ventilation and Air Conditioning') in your search queries. Do not rely solely on the acronym, as you will miss companies that use the full terminology.
 - Vary the terms (e.g., if product is "Forklift Trucks", use "Forklift Trucks", "Forklifts", "Material Handling Equipment").
 - Use company type indicators (e.g., "manufacturer", "supplier", "distributor", "service", "company", "installer").
 - Include the location in all queries.
