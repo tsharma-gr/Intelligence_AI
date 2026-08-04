@@ -9,7 +9,7 @@ logger = logging.getLogger("company_intelligence.query_generator")
 
 class QueryGeneratorService:
     @staticmethod
-    async def generate_queries(company_type: str, product_or_service: str, location: str, job: Optional[Any] = None) -> List[str]:
+    async def generate_queries(company_type: str, product_or_service: str, location: str, current_employer: str = "", job: Optional[Any] = None) -> List[str]:
         """
         Generates search query variations based on the user's requirements and configured limits.
         """
@@ -22,6 +22,7 @@ class QueryGeneratorService:
                 company_type=company_type,
                 product_or_service=product_or_service,
                 location=location,
+                current_employer=current_employer,
                 search_query_count=settings.search_query_count
             )
             

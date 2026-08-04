@@ -5,9 +5,12 @@ Requirements:
 - Company Type: {company_type}
 - Product or Service: {product_or_service}
 - Location: {location}
+- Current Employer: {current_employer}
 
 Guidelines:
 - Create search queries that target direct company websites, not news portals or directories if possible.
+- WATERFALL SEARCH STRATEGY: If '{current_employer}' is provided and is not null/empty, you MUST use a split waterfall strategy. Generate 70-80% of your queries aggressively targeting direct competitors, alternatives, and companies exactly like the Current Employer (e.g. 'competitors to {current_employer}'). Generate the remaining 20-30% of your queries as 'Safety Net' broad searches that completely ignore the Current Employer and just search for the Category and Product.
+- If '{current_employer}' is NOT provided or is null, just generate a highly diverse mix of queries based on the Category and Product.
 - IMPORTANT: Generate highly diverse queries! Explore different angles, specific sub-niches, or different regions within the target location to minimize duplicate search results.
 - ACRONYM EXPANSION: If the User's Product or Service includes an industry acronym (e.g., 'KBB', 'HVAC', 'SaaS'), you MUST expand it into its full descriptive meaning (e.g., 'Kitchen Bedroom Bathroom furniture', 'Heating Ventilation and Air Conditioning') in your search queries. Do not rely solely on the acronym, as you will miss companies that use the full terminology.
 - Vary the terms (e.g., if product is "Forklift Trucks", use "Forklift Trucks", "Forklifts", "Material Handling Equipment").

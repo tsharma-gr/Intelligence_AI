@@ -16,7 +16,8 @@ class QualificationService:
         company_type: str,
         product_or_service: str,
         location: str,
-        pages: List[CrawledPage],
+        current_employer: str = "",
+        pages: List[CrawledPage] = [],
         job: Optional[Any] = None
     ) -> Qualification:
         """
@@ -46,6 +47,7 @@ class QualificationService:
                 company_type=company_type,
                 product_or_service=product_or_service,
                 location=location,
+                current_employer=current_employer,
                 website_content=website_content
             )
             

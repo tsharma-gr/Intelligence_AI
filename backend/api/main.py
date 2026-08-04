@@ -151,6 +151,7 @@ async def websocket_endpoint(websocket: WebSocket):
         company_type = criteria.get("company_type")
         product_or_service = criteria.get("product_or_service")
         location = criteria.get("location")
+        current_employer = criteria.get("current_employer", "")
         
         if not all([company_type, product_or_service, location]):
             await websocket.send_json({
@@ -178,7 +179,8 @@ async def websocket_endpoint(websocket: WebSocket):
         await orchestrator.run_discovery(
             company_type=company_type,
             product_or_service=product_or_service,
-            location=location
+            location=location,
+            current_employer=current_employer
         )
         
     except WebSocketDisconnect:

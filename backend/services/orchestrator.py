@@ -38,7 +38,8 @@ class CompanyDiscoveryOrchestrator:
         self,
         company_type: str,
         product_or_service: str,
-        location: str
+        location: str,
+        current_employer: str = ""
     ) -> Dict[str, Any]:
         """
         Main entry point for discovery. Creates a SearchJob and orchestrates
@@ -92,6 +93,7 @@ class CompanyDiscoveryOrchestrator:
                 company_type=company_type,
                 product_or_service=product_or_service,
                 location=location,
+                current_employer=current_employer,
                 job=job
             )
             query_gen_finished_time = time.time()
@@ -310,6 +312,7 @@ class CompanyDiscoveryOrchestrator:
                                 company_type=company_type,
                                 product_or_service=product_or_service,
                                 location=location,
+                                current_employer=current_employer,
                                 pages=pages,
                                 job=job
                             ),
