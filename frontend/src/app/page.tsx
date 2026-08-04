@@ -53,6 +53,7 @@ export default function Home() {
     company_type: string;
     product_or_service: string;
     location: string;
+    current_employer?: string | null;
   }) => {
     setSessionCriteria(criteria);
     setViewState("discovery");

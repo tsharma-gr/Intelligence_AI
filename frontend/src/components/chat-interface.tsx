@@ -12,10 +12,11 @@ interface ExtractedData {
   company_type?: string;
   product_or_service?: string;
   location?: string;
+  current_employer?: string | null;
 }
 
 interface ChatInterfaceProps {
-  onDiscoveryStart: (criteria: { company_type: string; product_or_service: string; location: string }) => void;
+  onDiscoveryStart: (criteria: { company_type: string; product_or_service: string; location: string; current_employer?: string | null }) => void;
 }
 
 export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) {
