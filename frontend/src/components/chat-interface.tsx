@@ -258,6 +258,29 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
                   <div className="cia-req-waiting">Waiting <span className="cia-skel"></span></div>
                 )}
               </div>
+
+              <div className={`cia-req-card ${extractedData.current_employer || isReady ? 'completed' : ''}`}>
+                <div className="cia-req-top">
+                  <div className="cia-req-label">
+                    <div className="cia-req-icon">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm14 14v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+                    Current Employer
+                  </div>
+                  {extractedData.current_employer || isReady ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#52d68a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  ) : (
+                    <div className="cia-req-status"></div>
+                  )}
+                </div>
+                {extractedData.current_employer ? (
+                  <div className="cia-req-completed-text">{extractedData.current_employer}</div>
+                ) : isReady ? (
+                  <div className="cia-req-completed-text" style={{color: '#8b8d98', fontStyle: 'italic'}}>N/A (Skipped)</div>
+                ) : (
+                  <div className="cia-req-waiting">Optional <span className="cia-skel"></span></div>
+                )}
+              </div>
             </div>
 
             {isReady ? (
