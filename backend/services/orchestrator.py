@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Callable, Awaitable, Optional
 from datetime import datetime
 from urllib.parse import urlparse
 
-from backend.models.company import Company, SearchHistory, SearchResult
+from backend.models.company import Company, SearchHistory, SearchResult, Page
 from backend.services.query_generator import QueryGeneratorService
 from backend.services.search.factory import SearchFactory
 from backend.crawler.crawler import WebsiteCrawler, BotProtectionError
@@ -257,20 +257,22 @@ class CompanyDiscoveryOrchestrator:
                         ai_queue_counter += 1
                         await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
                     except BotProtectionError as e:
-                        logger.warning(f"Bot protection blocked {candidate.website}")
+                        logger.warning(f"Bot protection blocked {candidate.website}. Falling back to search snippet.")
                         
-                        from backend.models.company import Qualification
-                        blocked_company = Company(
-                            company_name=candidate.company_name,
-                            website=candidate.website,
-                            qualification=Qualification(qualified=False, is_blocked=True, reason="Blocked by Cloudflare/Anti-Bot Protection", confidence=0),
-                            is_blocked=True
-                        )
+                        fallback_content = f"Website title: {candidate.title}\nGoogle Search Snippet: {candidate.snippet}\nNote: Website is protected by Cloudflare/Anti-Bot."
+                        pages = [
+                            Page(
+                                url=candidate.website,
+                                page_type="home (search snippet fallback)",
+                                content=fallback_content
+                            )
+                        ]
+                        job.update_metrics("crawled_count", 1, add=True)
                         
-                        await self.result_store.save_company(job.job_id, blocked_company.model_dump())
-                        job.results.append(blocked_company.model_dump())
-                        job.update_metrics("blocked_count", 1, add=True)
-                        await self._send_progress(job.job_id, "ai_blocked", f"{prefix}: BLOCKED by Anti-Bot", {"company": blocked_company.model_dump()})
+                        nonlocal ai_queue_counter
+                        ai_queue_counter += 1
+                        # Push to AI queue with lowest priority (3)
+                        await job.ai_queue.put((3, ai_queue_counter, (candidate, pages)))
                         
                     except Exception as e:
                         logger.error(f"Crawl worker {worker_id} failed on {candidate.website}: {e}")

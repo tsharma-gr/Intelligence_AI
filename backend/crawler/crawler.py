@@ -177,13 +177,21 @@ class WebsiteCrawler:
             ) as client:
                 response = await client.get(url)
                 if response.status_code == 200:
-                    html = response.text
+                    content_type = response.headers.get("content-type", "").lower()
+                    if "text/html" in content_type or "text/plain" in content_type or not content_type:
+                        html = response.text
+                    else:
+                        logger.warning(f"HTTPX fetch returned non-HTML content-type '{content_type}' for '{url}'")
                 elif response.status_code in (301, 302, 303, 307, 308):
                     location = response.headers.get("location", "")
                     if location:
                         response2 = await client.get(location)
                         if response2.status_code == 200:
-                            html = response2.text
+                            content_type2 = response2.headers.get("content-type", "").lower()
+                            if "text/html" in content_type2 or "text/plain" in content_type2 or not content_type2:
+                                html = response2.text
+                            else:
+                                logger.warning(f"HTTPX redirect returned non-HTML content-type '{content_type2}' for '{location}'")
                 else:
                     logger.warning(f"HTTP {response.status_code} for '{url}'")
         except Exception as e:

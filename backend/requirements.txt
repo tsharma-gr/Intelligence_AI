@@ -13,6 +13,7 @@ python-dotenv>=1.0.0
 json-repair>=0.61.0
 duckduckgo-search>=8.0.0
 ddgs>=9.0.0
+brotli>=1.1.0
 
 # Production Additions
 sentry-sdk[fastapi]>=1.40.0
