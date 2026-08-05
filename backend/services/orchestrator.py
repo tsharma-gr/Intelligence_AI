@@ -206,6 +206,7 @@ class CompanyDiscoveryOrchestrator:
             # PHASE 4: Crawl Workers (Leasing browser context, extraction)
             # ─────────────────────────────────────────────────────────────────
             async def crawl_worker(worker_id: int):
+                nonlocal ai_queue_counter
                 while not job.is_cancelled():
                     candidate: Optional[SearchResult] = await job.crawler_queue.get()
                     if candidate is None:
@@ -253,7 +254,6 @@ class CompanyDiscoveryOrchestrator:
                                 job.metrics["subpage_crawl_times"].append(crawl_duration)
                                 
                         # Increment counter to prevent SearchResult comparison TypeErrors
-                        nonlocal ai_queue_counter
                         ai_queue_counter += 1
                         await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
                     except BotProtectionError as e:
@@ -269,7 +269,6 @@ class CompanyDiscoveryOrchestrator:
                         ]
                         job.update_metrics("crawled_count", 1, add=True)
                         
-                        nonlocal ai_queue_counter
                         ai_queue_counter += 1
                         # Push to AI queue with lowest priority (3)
                         await job.ai_queue.put((3, ai_queue_counter, (candidate, pages)))
