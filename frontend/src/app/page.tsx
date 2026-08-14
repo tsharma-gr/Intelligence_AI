@@ -252,32 +252,38 @@ export default function Home() {
 
             <ProgressIndicator logs={logs} currentStage={currentStage} />
             
-            {/* Live Results Section */}
-            {(allCompanies.length > 0 || summary) && (
-              <div className="mt-12 space-y-8 w-full animate-fade-in border-t border-white/10 pt-12">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+            {/* Live Results Section ALWAYS VISIBLE */}
+            <div className="mt-12 space-y-8 w-full animate-fade-in border-t border-white/10 pt-12">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                    <Layers className="text-blue-400" size={20} />
+                    <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
+                  </h2>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI Cards */}
+              {summary && (
+                <ExecutionSummary summary={summary} searchId={searchId} />
+              )}
+
+              {/* Split Tables tabbed list */}
+              {allCompanies.length > 0 ? (
+                <ResultsTable companies={allCompanies} />
+              ) : (
+                <div className="p-12 text-center border border-white/5 rounded-2xl bg-white/5 flex flex-col items-center justify-center space-y-4">
+                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <div>
-                    <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                      <Layers className="text-blue-400" size={20} />
-                      <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
-                    </h2>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
-                    </p>
+                    <h3 className="text-sm font-bold text-blue-400">Waiting for AI Evaluations...</h3>
+                    <p className="text-xs text-zinc-400">Companies will appear in this table line-by-line as soon as they are processed.</p>
                   </div>
                 </div>
-
-                {/* KPI Cards */}
-                {summary && (
-                  <ExecutionSummary summary={summary} searchId={searchId} />
-                )}
-
-                {/* Split Tables tabbed list */}
-                {allCompanies.length > 0 && (
-                  <ResultsTable companies={allCompanies} />
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
