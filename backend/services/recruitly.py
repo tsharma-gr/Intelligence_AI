@@ -160,12 +160,17 @@ async def fetch_company_contacts(company_id: str) -> list:
                         # Generate the direct clickable link to the CRM styled Web App
                         crm_url = f"{app_base_url}/company" if not contact_id else f"{app_base_url}/contact?id={contact_id}"
                         
+                        # Extract Last Contacted
+                        recent_activity = full_profile.get("recentActivity") or {}
+                        last_contacted = recent_activity.get("lastContacted") or "Never"
+                        
                         extracted_contacts.append({
                             "name": full_name,
                             "job_title": full_profile.get("jobTitle") or contact.get("jobTitle") or "",
                             "linkedin": full_profile.get("linkedIn") or "",
                             "reference_id": reference_id,
-                            "crm_url": crm_url
+                            "crm_url": crm_url,
+                            "last_contacted": last_contacted
                         })
                 return extracted_contacts
                 

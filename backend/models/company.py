@@ -33,6 +33,7 @@ class Company(BaseModel):
     qualification: Optional[Qualification] = None
     is_blocked: bool = False
     bypass_used: Optional[str] = None
+    existing_contacts: Optional[List[dict]] = None
 
 class SearchHistory(BaseModel):
     search_id: str

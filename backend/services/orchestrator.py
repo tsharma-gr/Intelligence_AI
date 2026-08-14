@@ -419,6 +419,7 @@ class CompanyDiscoveryOrchestrator:
                                 
                                 # Fetch existing contacts from Recruitly API
                                 existing_contacts = await fetch_company_contacts(cy_uuid)
+                                company.existing_contacts = existing_contacts
                                 company_dict["existing_contacts"] = existing_contacts
                                 
                             else:

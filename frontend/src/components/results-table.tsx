@@ -381,6 +381,12 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                           <div>
                             <div className="font-semibold text-zinc-200 text-sm">{contact.name}</div>
                             <div className="text-xs text-zinc-400 mt-0.5">{contact.job_title}</div>
+                            {contact.last_contacted && (
+                              <div className="text-[10px] text-zinc-500 mt-1 flex items-center gap-1">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Last Contacted: {contact.last_contacted}
+                              </div>
+                            )}
                           </div>
                           <div className="flex gap-2">
                             {contact.linkedin && (

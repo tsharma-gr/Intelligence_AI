@@ -80,7 +80,7 @@ class GoogleSheetsService:
         headers = {
             "'Execution Summary'!A1:F1": [["Search Date", "Search ID", "Total Companies", "Qualified", "Disqualified", "Duration"]],
             "'Search History'!A1:E1": [["Search Date", "Search ID", "Company Type", "Product", "Location"]],
-            "'Qualified Companies'!A1:K1": [["Search Date", "Search ID", "Company Name", "Website", "Address", "Phone", "Category", "Reason", "Evidence", "Source Page", "Confidence"]],
+            "'Qualified Companies'!A1:L1": [["Search Date", "Search ID", "Company Name", "Website", "Address", "Phone", "Category", "Reason", "Evidence", "Source Page", "Confidence", "CRM Contacts"]],
             "'Disqualified Companies'!A1:G1": [["Search Date", "Search ID", "Company Name", "Website", "Reason", "Evidence", "Source Page"]],
             "'Execution Logs'!A1:F1": [["Search Date", "Search ID", "Finished", "Companies Processed", "Duration", "Errors"]]
         }
@@ -136,6 +136,13 @@ class GoogleSheetsService:
             source_pages = "; ".join([e.page for e in q.evidence]) if q.evidence else "None"
             
             if q.qualified:
+                contacts_str = "None"
+                if c.existing_contacts:
+                    contacts_str = " | ".join([
+                        f"{cnt.get('name', 'Unknown')} ({cnt.get('job_title', 'No Title')}) - Last Contacted: {cnt.get('last_contacted', 'Never')}" 
+                        for cnt in c.existing_contacts
+                    ])
+                    
                 qualified_rows.append([
                     history.timestamp,
                     history.search_id,
@@ -147,7 +154,8 @@ class GoogleSheetsService:
                     q.reason,
                     evidence_text,
                     source_pages,
-                    f"{q.confidence}%"
+                    f"{q.confidence}%",
+                    contacts_str
                 ])
             else:
                 disqualified_rows.append([
