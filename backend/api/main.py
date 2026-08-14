@@ -5,7 +5,7 @@ import sys
 import asyncio
 import uuid
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sentry_sdk
@@ -136,6 +136,113 @@ async def chat_endpoint(request: Request, chat_req: ChatRequest):
         
     except Exception as e:
         logger.exception("Error in chat endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+
+import tempfile
+import httpx
+import os
+from backend.services.document_parser import extract_text_from_file
+from backend.services.auto_sector_classifier import classify
+
+@app.post("/api/auto-detect")
+async def auto_detect_endpoint(
+    employer_url: str = Form(""),
+    cv_file: UploadFile = File(None),
+    support_file: UploadFile = File(None)
+):
+    try:
+        cv_text = ""
+        support_text = ""
+        
+        # Parse CV
+        if cv_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(cv_file.filename)[1]) as tmp:
+                tmp.write(await cv_file.read())
+                tmp_path = tmp.name
+            cv_text = extract_text_from_file(tmp_path)
+            os.remove(tmp_path)
+            
+        # Parse Support Doc
+        if support_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(support_file.filename)[1]) as tmp:
+                tmp.write(await support_file.read())
+                tmp_path = tmp.name
+            support_text = extract_text_from_file(tmp_path)
+            os.remove(tmp_path)
+            
+        # Scrape Website
+        website_text = ""
+        if employer_url:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                try:
+                    jina_res = await client.get(f"https://r.jina.ai/{employer_url}")
+                    if jina_res.status_code == 200:
+                        website_text = jina_res.text
+                except Exception as e:
+                    logger.error(f"Failed to scrape {employer_url}: {e}")
+                    
+        # Run Rule-based Classifier
+        classification = classify(
+            employer_homepage_text=website_text,
+            linkedin_about_text=support_text + "\n" + cv_text,
+            homepage_url=employer_url
+        )
+        
+        # Use LLM to generate Rationale & Location
+        llm = LLMFactory.get_service()
+        prompt = f"""
+        You are an expert sector classifier.
+        We have automatically classified the target sector as:
+        Sector: {classification['sector']}
+        Subsector: {classification['subsector'] if classification['subsector'] else 'PLEASE DETERMINE FROM TEXT'}
+        Solution Type: {classification['solution_type']}
+        Product Focus: {classification['product_focus'] if classification['product_focus'] else 'PLEASE DETERMINE FROM TEXT'}
+        
+        Website Text: {website_text[:1500]}
+        CV Text: {cv_text[:1500]}
+        Support Notes: {support_text[:1500]}
+        
+        Task:
+        1. Write a short 3-line rationale explaining why this classification makes sense based on the texts.
+        2. Extract the target 'Location' from the CV and Notes (e.g., 'UK', 'London, UK'). If none is found, default to 'UK'.
+        3. If the Subsector or Product Focus are 'PLEASE DETERMINE FROM TEXT', infer the most accurate 1-3 word description for them based on the text. If they are already filled out, just output them exactly as is.
+        
+        Output JSON only:
+        {{
+            "rationale": "...",
+            "location": "...",
+            "subsector": "...",
+            "product_focus": "..."
+        }}
+        """
+        response_text = await llm.generate_response(prompt, "Output valid JSON only.")
+        
+        # Parse LLM response
+        rationale = "Based on the provided documents and website, this matches the target profile."
+        location = "UK"
+        try:
+            # simple json extraction
+            json_str = response_text[response_text.find("{"):response_text.rfind("}")+1]
+            data = json.loads(json_str)
+            if "rationale" in data:
+                rationale = data["rationale"]
+            if "location" in data:
+                location = data["location"]
+            if "subsector" in data and not classification['subsector']:
+                classification['subsector'] = data["subsector"]
+            if "product_focus" in data and not classification['product_focus']:
+                classification['product_focus'] = data["product_focus"]
+        except Exception as e:
+            logger.error(f"Failed to parse rationale json: {e}")
+            
+        return {
+            "classification": classification,
+            "rationale": rationale,
+            "location": location
+        }
+        
+    except Exception as e:
+        logger.exception("Error in auto-detect endpoint")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/api/ws/discovery")
