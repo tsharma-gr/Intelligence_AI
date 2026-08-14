@@ -107,16 +107,9 @@ class CompanyDiscoveryOrchestrator:
             search_service = SearchFactory.get_service()
             
             # Circuit Breaker setup (Milestone 3)
-            consecutive_search_failures = 0
-            failures_lock = asyncio.Lock()
             search_semaphore = asyncio.Semaphore(2) # Prevent 429 rate limits by limiting parallel searches
-            fallback_service = None
-            if settings.search_provider.lower() == "duckduckgo":
-                from backend.services.search.serper import SerperSearchService
-                fallback_service = SerperSearchService(api_key=settings.serper_api_key)
             
             async def search_worker(query: str, worker_idx: int):
-                nonlocal consecutive_search_failures
                 # Stagger the start time slightly, but semaphore enforces strict limit
                 await asyncio.sleep(worker_idx * 0.5)
                 
@@ -124,21 +117,11 @@ class CompanyDiscoveryOrchestrator:
                     try:
                         await self._send_progress(job.job_id, "search_progress", f"Searching variation {worker_idx}: '{query}'", {})
                         
-                        # Determine active search service based on circuit breaker status
-                        active_service = search_service
-                        async with failures_lock:
-                            if consecutive_search_failures >= 3 and fallback_service:
-                                active_service = fallback_service
-                                
                         results = await RetryManager.run_with_retry(
-                            lambda: active_service.search(query, num_results=settings.results_per_query),
+                            lambda: search_service.search(query, num_results=settings.results_per_query),
                             retries=3,
                             context_name=f"Search Query '{query}'"
                         )
-                        
-                        # Reset failure count on success
-                        async with failures_lock:
-                            consecutive_search_failures = 0
                         
                         for item in results:
                             if job.is_cancelled():
@@ -146,10 +129,6 @@ class CompanyDiscoveryOrchestrator:
                             await search_results_queue.put(item)
                     except Exception as e:
                         logger.error(f"Search worker {worker_idx} failed for '{query}': {e}")
-                        async with failures_lock:
-                            consecutive_search_failures += 1
-                            if consecutive_search_failures == 3 and fallback_service:
-                                logger.critical("Circuit Breaker tripped! Switching search provider from DuckDuckGo to Serper.")
                 
                 # Finally block outside the semaphore so it executes when the worker completes
                 job.update_metrics("search_queries_completed", 1, add=True)
