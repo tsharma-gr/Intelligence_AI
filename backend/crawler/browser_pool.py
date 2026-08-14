@@ -161,6 +161,17 @@ class BrowserPoolManager:
                     pooled.visit_count = 0
                 except Exception as respawn_err:
                     logger.critical(f"Failed to respawn context on browser crash: {respawn_err}")
+                    logger.info("Attempting full browser respawn to recover...")
+                    try:
+                        await self._respawn_browser(pooled.browser_index)
+                        pooled.context = await self._browsers[pooled.browser_index].new_context(
+                            java_script_enabled=True,
+                            bypass_csp=True
+                        )
+                        pooled.visit_count = 0
+                        logger.info("Successfully recovered from full browser crash.")
+                    except Exception as hard_err:
+                        logger.critical(f"HARD FAILURE: Could not respawn browser: {hard_err}")
                 
                 raise
             finally:

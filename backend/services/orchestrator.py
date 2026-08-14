@@ -4,13 +4,13 @@ import time
 from typing import List, Dict, Any, Callable, Awaitable, Optional
 from datetime import datetime
 from urllib.parse import urlparse
+import httpx
 
 from backend.models.company import Company, SearchHistory, SearchResult, Page
 from backend.services.query_generator import QueryGeneratorService
 from backend.services.search.factory import SearchFactory
 from backend.crawler.crawler import WebsiteCrawler, BotProtectionError
 from backend.services.qualification import QualificationService
-from backend.services.sheets import GoogleSheetsService
 from backend.services.llm.base import token_usage, reset_token_usage
 from backend.api.config import settings
 from backend.services.job_manager import SearchJob, JobManager
@@ -20,12 +20,15 @@ from backend.crawler.browser_pool import browser_pool
 from backend.services.storage import SQLiteJobStore, SQLiteResultStore
 from backend.services.retry_manager import RetryManager
 
+# Phase 2 CRM & Firebase Imports
+from backend.services.firebase_db import save_qualified_company, save_disqualified_company, save_search_history
+from backend.services.recruitly import check_company_exists, fetch_company_contacts
+
 logger = logging.getLogger("company_intelligence.orchestrator")
 
 class CompanyDiscoveryOrchestrator:
     def __init__(self, on_event: Callable[[str, Dict[str, Any]], Awaitable[None]]):
         self.on_event = on_event
-        self.sheets_service = GoogleSheetsService()
         self.crawler = WebsiteCrawler(use_cache=True)
         self.ws_lock = asyncio.Lock()
         self.job_manager = JobManager()
@@ -69,10 +72,6 @@ class CompanyDiscoveryOrchestrator:
             timestamp=job.created_at
         )
 
-        # Resolve Sheet ID upfront for streaming batch updates
-        sheet_id = self.sheets_service.resolve_sheet_id()
-        self.sheets_service.write_search_history(sheet_id, history)
-
         start_time = time.time()
         unique_domains: set = set()
         candidates_lock = asyncio.Lock()
@@ -110,6 +109,7 @@ class CompanyDiscoveryOrchestrator:
             # Circuit Breaker setup (Milestone 3)
             consecutive_search_failures = 0
             failures_lock = asyncio.Lock()
+            search_semaphore = asyncio.Semaphore(2) # Prevent 429 rate limits by limiting parallel searches
             fallback_service = None
             if settings.search_provider.lower() == "duckduckgo":
                 from backend.services.search.serper import SerperSearchService
@@ -117,40 +117,42 @@ class CompanyDiscoveryOrchestrator:
             
             async def search_worker(query: str, worker_idx: int):
                 nonlocal consecutive_search_failures
-                # Stagger the start time of each worker to prevent Serper 429 Rate Limit Errors
+                # Stagger the start time slightly, but semaphore enforces strict limit
                 await asyncio.sleep(worker_idx * 0.5)
                 
-                try:
-                    await self._send_progress(job.job_id, "search_progress", f"Searching variation {worker_idx}: '{query}'", {})
-                    
-                    # Determine active search service based on circuit breaker status
-                    active_service = search_service
-                    async with failures_lock:
-                        if consecutive_search_failures >= 3 and fallback_service:
-                            active_service = fallback_service
-                            
-                    results = await RetryManager.run_with_retry(
-                        lambda: active_service.search(query, num_results=settings.results_per_query),
-                        retries=3,
-                        context_name=f"Search Query '{query}'"
-                    )
-                    
-                    # Reset failure count on success
-                    async with failures_lock:
-                        consecutive_search_failures = 0
-                    
-                    for item in results:
-                        if job.is_cancelled():
-                            break
-                        await search_results_queue.put(item)
-                except Exception as e:
-                    logger.error(f"Search worker {worker_idx} failed for '{query}': {e}")
-                    async with failures_lock:
-                        consecutive_search_failures += 1
-                        if consecutive_search_failures == 3 and fallback_service:
-                            logger.critical("Circuit Breaker tripped! Switching search provider from DuckDuckGo to Serper.")
-                finally:
-                    job.update_metrics("search_queries_completed", 1, add=True)
+                async with search_semaphore:
+                    try:
+                        await self._send_progress(job.job_id, "search_progress", f"Searching variation {worker_idx}: '{query}'", {})
+                        
+                        # Determine active search service based on circuit breaker status
+                        active_service = search_service
+                        async with failures_lock:
+                            if consecutive_search_failures >= 3 and fallback_service:
+                                active_service = fallback_service
+                                
+                        results = await RetryManager.run_with_retry(
+                            lambda: active_service.search(query, num_results=settings.results_per_query),
+                            retries=3,
+                            context_name=f"Search Query '{query}'"
+                        )
+                        
+                        # Reset failure count on success
+                        async with failures_lock:
+                            consecutive_search_failures = 0
+                        
+                        for item in results:
+                            if job.is_cancelled():
+                                break
+                            await search_results_queue.put(item)
+                    except Exception as e:
+                        logger.error(f"Search worker {worker_idx} failed for '{query}': {e}")
+                        async with failures_lock:
+                            consecutive_search_failures += 1
+                            if consecutive_search_failures == 3 and fallback_service:
+                                logger.critical("Circuit Breaker tripped! Switching search provider from DuckDuckGo to Serper.")
+                
+                # Finally block outside the semaphore so it executes when the worker completes
+                job.update_metrics("search_queries_completed", 1, add=True)
 
             # Start search workers
             search_tasks = [
@@ -257,13 +259,65 @@ class CompanyDiscoveryOrchestrator:
                         ai_queue_counter += 1
                         await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
                     except BotProtectionError as e:
-                        logger.warning(f"Bot protection blocked {candidate.website}. Falling back to search snippet.")
+                        logger.warning(f"Bot protection blocked {candidate.website}. Attempting multi-tier fallbacks.")
                         
-                        fallback_content = f"Website title: {candidate.title}\nGoogle Search Snippet: {candidate.snippet}\nNote: Website is protected by Cloudflare/Anti-Bot."
+                        fallback_success = False
+                        fallback_content = ""
+                        page_type = ""
+                        
+                        # Tier 1: Jina Reader API (With 3 Retries)
+                        for attempt in range(3):
+                            try:
+                                jina_api = f"https://r.jina.ai/{candidate.website}"
+                                async with httpx.AsyncClient() as client:
+                                    jina_resp = await client.get(jina_api, timeout=20)
+                                    if jina_resp.status_code == 200 and len(jina_resp.text) > 200:
+                                        fallback_content = jina_resp.text
+                                        page_type = "home (jina reader bypass)"
+                                        fallback_success = True
+                                        candidate.bypass_used = "Jina Reader"
+                                        logger.info(f"Successfully bypassed Cloudflare using Jina Reader for {candidate.website}")
+                                        break
+                                    elif jina_resp.status_code == 429:
+                                        logger.warning(f"Jina Reader rate limit hit (Attempt {attempt+1}/3). Retrying in {2*(attempt+1)}s...")
+                                        await asyncio.sleep(2 * (attempt + 1))
+                                    else:
+                                        break # If it's a 404 or other error, no need to retry
+                            except Exception as jina_err:
+                                logger.warning(f"Jina Reader fallback failed on attempt {attempt+1} for {candidate.website}: {jina_err}")
+                                await asyncio.sleep(2)
+
+                        # Tier 2: Wayback Machine
+                        if not fallback_success:
+                            try:
+                                wayback_api = f"https://archive.org/wayback/available?url={candidate.website}"
+                                async with httpx.AsyncClient() as client:
+                                    wb_resp = await client.get(wayback_api, timeout=10)
+                                    wb_data = wb_resp.json()
+                                    if wb_data.get("archived_snapshots") and "closest" in wb_data["archived_snapshots"]:
+                                        snapshot_url = wb_data["archived_snapshots"]["closest"]["url"]
+                                        snap_resp = await client.get(snapshot_url, timeout=15)
+                                        if snap_resp.status_code == 200:
+                                            from backend.crawler.extractor import ContentExtractor
+                                            fallback_content = ContentExtractor.extract_clean_text(snap_resp.text)
+                                            page_type = "home (wayback machine cache)"
+                                            fallback_success = True
+                                            candidate.bypass_used = "Wayback Machine"
+                                            logger.info(f"Successfully bypassed Cloudflare using Wayback Machine for {candidate.website}")
+                            except Exception as wb_err:
+                                logger.warning(f"Wayback Machine fallback failed for {candidate.website}: {wb_err}")
+                                
+                        # Tier 3: Search Snippet Fallback
+                        if not fallback_success:
+                            logger.info(f"Heavy fallbacks failed. Falling back to search snippet for {candidate.website}")
+                            fallback_content = f"Website title: {candidate.title}\nGoogle Search Snippet: {candidate.snippet}\nNote: Website is protected by Cloudflare/Anti-Bot."
+                            page_type = "home (search snippet fallback)"
+                            candidate.is_blocked = True
+
                         pages = [
                             Page(
                                 url=candidate.website,
-                                page_type="home (search snippet fallback)",
+                                page_type=page_type,
                                 content=fallback_content
                             )
                         ]
@@ -336,11 +390,13 @@ class CompanyDiscoveryOrchestrator:
                         
                         company = Company(
                             company_name=qualification.corrected_company_name or candidate.company_name,
-                            website=candidate.website,
+                            website=qualification.official_website or candidate.website,
                             address=address,
                             phone=phone,
                             category=product_or_service,
-                            qualification=qualification
+                            qualification=qualification,
+                            is_blocked=candidate.is_blocked,
+                            bypass_used=candidate.bypass_used
                         )
                         
                         await self.result_store.save_company(job.job_id, company.model_dump())
@@ -351,11 +407,38 @@ class CompanyDiscoveryOrchestrator:
                             await self._send_progress(job.job_id, "crawl_skip", f"{prefix}: Skipped (blocked or timeout)", {})
                         elif qualification.qualified:
                             job.update_metrics("qualified_count", 1, add=True)
-                            await self._send_progress(job.job_id, "ai_qualified", f"{prefix}: QUALIFIED ({qualification.confidence}% confidence)", {"company": company.model_dump()})
-                            await job.sheets_queue.put(company)
+                            
+                            # PHASE 2: Recruitly CRM Check
+                            cy_result = await check_company_exists(company.company_name, company.website)
+                            if cy_result:
+                                cy_uuid, cy_ref = cy_result
+                                company.qualification.reason += f" [Recruitly ID: {cy_ref}]" # Temporary hack to pass ID down, properly should be in model
+                                company_dict = company.model_dump()
+                                company_dict["recruitly_status"] = "EXISTS"
+                                company_dict["recruitly_id"] = cy_ref
+                                
+                                # Fetch existing contacts from Recruitly API
+                                existing_contacts = await fetch_company_contacts(cy_uuid)
+                                company_dict["existing_contacts"] = existing_contacts
+                                
+                            else:
+                                company_dict = company.model_dump()
+                                company_dict["recruitly_status"] = "FRESH"
+                                
+                            # Save to Firebase Collection 1: Qualified Companies
+                            company_dict["search_id"] = job.job_id
+                            save_qualified_company(company_dict)
+                            
+                            await self._send_progress(job.job_id, "ai_qualified", f"{prefix}: QUALIFIED ({qualification.confidence}% confidence)", {"company": company_dict})
                         else:
                             job.update_metrics("disqualified_count", 1, add=True)
-                            await self._send_progress(job.job_id, "ai_disqualified", f"{prefix}: DISQUALIFIED", {"company": company.model_dump()})
+                            company_dict = company.model_dump()
+                            
+                            # Save to Firebase Collection 2: Disqualified Companies
+                            company_dict["search_id"] = job.job_id
+                            save_disqualified_company(company_dict)
+                            
+                            await self._send_progress(job.job_id, "ai_disqualified", f"{prefix}: DISQUALIFIED", {"company": company_dict})
                             
                     except Exception as e:
                         logger.error(f"AI Worker {worker_id} failed qualification for {candidate.company_name}: {e}")
@@ -370,37 +453,7 @@ class CompanyDiscoveryOrchestrator:
             ]
             cancellation_tasks.extend(ai_tasks)
 
-            # ─────────────────────────────────────────────────────────────────
-            # PHASE 6: Downstream Sheets worker (Real-Time Batch Exporter)
-            # ─────────────────────────────────────────────────────────────────
-            async def sheets_batch_worker():
-                batch = []
-                last_flush = time.time()
-                
-                while True:
-                    try:
-                        company = await asyncio.wait_for(job.sheets_queue.get(), timeout=1.0)
-                        if company is None:
-                            if batch:
-                                self.sheets_service.append_companies_batch(sheet_id, history, batch)
-                            job.sheets_queue.task_done()
-                            break
-                        
-                        batch.append(company)
-                        job.sheets_queue.task_done()
-                        
-                        if len(batch) >= 5 or (time.time() - last_flush) >= 5.0:
-                            self.sheets_service.append_companies_batch(sheet_id, history, batch)
-                            batch.clear()
-                            last_flush = time.time()
-                    except asyncio.TimeoutError:
-                        if batch:
-                            self.sheets_service.append_companies_batch(sheet_id, history, batch)
-                            batch.clear()
-                            last_flush = time.time()
 
-            sheets_task = asyncio.create_task(sheets_batch_worker())
-            cancellation_tasks.append(sheets_task)
 
             # Wait for search, deduplication and crawlers to finish enqueuing
             await asyncio.gather(*search_tasks, return_exceptions=True)
@@ -414,23 +467,20 @@ class CompanyDiscoveryOrchestrator:
 
             # Signal AI workers to stop after crawler queue is fully completed (Milestone 3 Priority Queue)
             for _ in range(max_ai_workers):
-                await job.ai_queue.put((3, 0, None))
+                await job.ai_queue.put((99, 0, None))
 
             # Wait for AI workers to finish processing
             await job.ai_queue.join()
             for task in ai_tasks:
                 task.cancel()
 
-            # Signal sheets worker to stop and wait
-            sheets_start_time = time.time()
-            await job.sheets_queue.put(None)
-            await sheets_task
-
+            # Cleaned up sheets worker
+            
             finished_at = datetime.utcnow().isoformat()
             duration_sec = time.time() - start_time
             duration_str = f"{duration_sec:.1f}s"
             
-            sheets_duration = time.time() - sheets_start_time
+            sheets_duration = 0.0
             query_gen_duration = query_gen_finished_time - query_gen_start_time
             search_duration = search_finished_time - search_start_time
 
@@ -452,8 +502,16 @@ class CompanyDiscoveryOrchestrator:
                 "errors": "None"
             }
             
-            # Append final summary row
-            self.sheets_service.write_results_summary(sheet_id, history, summary)
+            # Save final summary to Firebase Search History
+            save_search_history(
+                search_id=job.job_id,
+                criteria={
+                    "company_type": company_type,
+                    "product_or_service": product_or_service,
+                    "location": location
+                },
+                summary=summary
+            )
             
             # Update final job metrics to JobStore
             await self.job_store.update_job_status(job.job_id, "completed", job.metrics)
@@ -506,8 +564,16 @@ class CompanyDiscoveryOrchestrator:
                 "errors": "None"
             }
             
-            # Append final summary row
-            self.sheets_service.write_results_summary(sheet_id, history, summary)
+            # Save final summary to Firebase Search History
+            save_search_history(
+                search_id=job.job_id,
+                criteria={
+                    "company_type": company_type,
+                    "product_or_service": product_or_service,
+                    "location": location
+                },
+                summary=summary
+            )
             
             # Update final job metrics to JobStore
             await self.job_store.update_job_status(job.job_id, "completed", job.metrics)
@@ -531,6 +597,18 @@ class CompanyDiscoveryOrchestrator:
             print(f"  Total pipeline run  : {duration_sec:.2f}s")
             print(f"  Throughput          : {throughput_comp_sec:.2f} companies/sec")
             print("=" * 52 + "\n")
+
+            # Save to Firebase Collection 3: Search History
+            save_search_history(
+                search_id=job.job_id,
+                criteria={
+                    "company_type": company_type,
+                    "product_or_service": product_or_service,
+                    "location": location,
+                    "current_employer": current_employer
+                },
+                summary=summary
+            )
 
             final_data = {
                 "search_id": job.job_id,

@@ -27,6 +27,11 @@ class SerperSearchService(BaseSearchService):
             
             async with httpx.AsyncClient(timeout=15.0) as client:
                 for page in range(1, pages_to_fetch + 1):
+                    # Prevent 429 Rate Limits from Serper API by pacing the requests
+                    import asyncio
+                    if page > 1:
+                        await asyncio.sleep(0.5)
+                        
                     payload = {
                         "q": query,
                         "page": page
@@ -37,14 +42,13 @@ class SerperSearchService(BaseSearchService):
                     
                     organic_results = data.get("organic", [])
                     if not organic_results:
-                        break # Stop if no more results
+                        break # Stop if Google runs out of pages
                         
                     for item in organic_results:
                         link = item.get("link", "")
                         if not link:
                             continue
                             
-                        # Deduce a neat fallback company name from website title or hostname
                         title = item.get("title", "")
                         snippet = item.get("snippet", "")
                         
@@ -58,7 +62,7 @@ class SerperSearchService(BaseSearchService):
                             title=title,
                             snippet=snippet
                         ))
-                    
+                        
                     if len(results) >= num_results:
                         break
                         
@@ -66,7 +70,7 @@ class SerperSearchService(BaseSearchService):
                 
         except Exception as e:
             logger.exception(f"Error calling Serper API for query '{query}'")
-            return self._get_mock_results(query)
+            raise
 
     def _get_mock_results(self, query: str) -> List[SearchResult]:
         """Fallback mock results if Serper key is missing or API errors out."""

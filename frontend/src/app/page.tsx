@@ -6,6 +6,8 @@ import ChatInterface from "@/components/chat-interface";
 import ProgressIndicator, { LogEntry } from "@/components/progress-indicator";
 import ExecutionSummary from "@/components/execution-summary";
 import ResultsTable, { Company } from "@/components/results-table";
+import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 type ViewState = "chat" | "discovery" | "results";
 
@@ -15,9 +17,51 @@ export default function Home() {
   const [currentStage, setCurrentStage] = useState("query_gen");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [summary, setSummary] = useState<any>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [qualifiedCompanies, setQualifiedCompanies] = useState<Company[]>([]);
+  const [disqualifiedCompanies, setDisqualifiedCompanies] = useState<Company[]>([]);
   const [sessionCriteria, setSessionCriteria] = useState<any>(null);
   const headerRef = React.useRef<HTMLDivElement>(null);
+  
+  const allCompanies = [...qualifiedCompanies, ...disqualifiedCompanies];
+
+  // Firebase Real-time Listeners
+  useEffect(() => {
+    if (!searchId) return;
+
+    // 1. Qualified Companies
+    const qQualified = query(collection(db, "qualified_companies"), where("search_id", "==", searchId));
+    const unsubQualified = onSnapshot(qQualified, (snapshot) => {
+      const docs = snapshot.docs.map(d => d.data() as Company);
+      setQualifiedCompanies(docs);
+      if (docs.length > 0) setViewState("results");
+    });
+
+    // 2. Disqualified Companies
+    const qDisqualified = query(collection(db, "disqualified_companies"), where("search_id", "==", searchId));
+    const unsubDisqualified = onSnapshot(qDisqualified, (snapshot) => {
+      const docs = snapshot.docs.map(d => d.data() as Company);
+      setDisqualifiedCompanies(docs);
+      if (docs.length > 0) setViewState("results");
+    });
+
+    // 3. Execution Summary (Final metrics)
+    const qSummary = query(collection(db, "search_history"), where("search_id", "==", searchId));
+    const unsubSummary = onSnapshot(qSummary, (snapshot) => {
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        if (data.summary) {
+          setSummary(data.summary);
+          setViewState("results");
+        }
+      }
+    });
+
+    return () => {
+      unsubQualified();
+      unsubDisqualified();
+      unsubSummary();
+    };
+  }, [searchId]);
 
   useEffect(() => {
     let ticking = false;
@@ -93,17 +137,12 @@ export default function Home() {
         setCurrentStage("ai");
       } else if (type === "ai_qualified" || type === "ai_disqualified" || type === "ai_blocked") {
         setCurrentStage("ai");
-        if (data.company) {
-          setCompanies(prev => [...prev, data.company]);
-          setViewState("results");
-        }
+        // State is now managed automatically via Firebase onSnapshot listeners!
       } else if (type === "sheets_start") {
         setCurrentStage("sheets");
       } else if (type === "completed") {
         setCurrentStage("completed");
-        setSummary(data.summary);
-        setCompanies(data.companies || []);
-        setViewState("results");
+        // Summary and final data is now fetched via Firebase onSnapshot listeners
         ws.close();
       } else if (type === "failed" || type === "error") {
         setCurrentStage("failed");
@@ -119,6 +158,8 @@ export default function Home() {
 
     ws.onclose = () => {
       addLog("system", "WebSocket connection closed.");
+      // Ensure the UI stops spinning when the backend disconnects naturally
+      setCurrentStage((prev) => (prev === "failed" ? "failed" : "completed"));
     };
   };
 
@@ -127,7 +168,8 @@ export default function Home() {
     setSessionCriteria(null);
     setLogs([]);
     setSummary(null);
-    setCompanies([]);
+    setQualifiedCompanies([]);
+    setDisqualifiedCompanies([]);
     setSearchId("");
   };
 
@@ -166,7 +208,7 @@ export default function Home() {
       </div>
 
       {/* Content Container */}
-      <section className="flex-1 flex flex-col p-4 md:p-8 max-w-5xl w-full mx-auto z-10 space-y-8 justify-center">
+      <section className="flex-1 flex flex-col p-4 md:p-8 max-w-5xl w-full mx-auto space-y-8 justify-center">
         
         {/* VIEW 1: Requirements Collection Dialogue */}
         {viewState === "chat" && (
@@ -244,7 +286,7 @@ export default function Home() {
             )}
 
             {/* Split Tables tabbed list */}
-            <ResultsTable companies={companies} />
+            <ResultsTable companies={allCompanies} />
           </div>
         )}
 

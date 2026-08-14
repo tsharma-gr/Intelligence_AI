@@ -2,7 +2,7 @@ import json
 from json_repair import repair_json
 import logging
 from typing import List, Optional, Any
-from backend.models.company import Qualification, Evidence
+from backend.models.company import Qualification
 from backend.crawler.models import CrawledPage
 from backend.services.llm.factory import LLMFactory
 from backend.prompts import load_prompt
@@ -28,8 +28,7 @@ class QualificationService:
             return Qualification(
                 qualified=False,
                 reason="No website content could be fetched or discovered.",
-                confidence=100,
-                evidence=[]
+                confidence=100
             )
             
         try:
@@ -80,20 +79,14 @@ class QualificationService:
             repaired_text = repair_json(clean_text, return_objects=False)
             qual_data = json.loads(repaired_text, strict=False)
             
-            # Construct and validate with Pydantic
-            evidence_list = []
-            for ev in qual_data.get("evidence", []):
-                evidence_list.append(Evidence(
-                    page=ev.get("page", ""),
-                    quote=ev.get("quote", "")
-                ))
-                
             return Qualification(
                 qualified=bool(qual_data.get("qualified", False)),
                 reason=str(qual_data.get("reason", "No reason provided.")),
                 confidence=int(qual_data.get("confidence", 50)),
                 corrected_company_name=qual_data.get("corrected_company_name"),
-                evidence=evidence_list
+                official_website=qual_data.get("official_website"),
+                address=qual_data.get("address"),
+                phone=qual_data.get("phone")
             )
             
         except Exception as e:

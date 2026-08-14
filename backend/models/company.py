@@ -6,15 +6,13 @@ class SearchResult(BaseModel):
     website: str
     title: str
     snippet: str
+    is_blocked: bool = False
+    bypass_used: Optional[str] = None
 
 class Page(BaseModel):
     url: str
     page_type: str  # 'home', 'about', 'products', 'services', 'solutions', 'contact', etc.
     content: str
-
-class Evidence(BaseModel):
-    page: str
-    quote: str
 
 class Qualification(BaseModel):
     qualified: bool
@@ -22,9 +20,9 @@ class Qualification(BaseModel):
     reason: str
     confidence: int = Field(..., ge=0, le=100)
     corrected_company_name: Optional[str] = None
+    official_website: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
-    evidence: List[Evidence] = []
 
 class Company(BaseModel):
     company_name: str
@@ -34,6 +32,7 @@ class Company(BaseModel):
     category: Optional[str] = None
     qualification: Optional[Qualification] = None
     is_blocked: bool = False
+    bypass_used: Optional[str] = None
 
 class SearchHistory(BaseModel):
     search_id: str

@@ -234,7 +234,7 @@ class WebsiteCrawler:
                     await page.route("**/*", _block_resources)
 
                     try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                        await page.goto(url, wait_until="domcontentloaded", timeout=8000)
                         html = await page.content()
                         
                         # Post-render bot protection check

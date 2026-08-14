@@ -79,7 +79,7 @@ def health_check():
     return {"status": "ok", "provider": settings.llm_provider}
 
 @app.post("/api/chat", response_model=ChatResponse)
-@limiter.limit("5/minute")
+@limiter.limit("50/minute")
 async def chat_endpoint(request: Request, chat_req: ChatRequest):
     try:
         # Load the chat prompt template

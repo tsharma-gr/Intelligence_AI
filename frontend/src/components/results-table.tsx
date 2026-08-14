@@ -23,6 +23,10 @@ export interface Company {
   phone?: string;
   category?: string;
   qualification: Qualification;
+  recruitly_status?: "EXISTS" | "FRESH";
+  recruitly_id?: string;
+  bypass_used?: string;
+  existing_contacts?: any[];
 }
 
 interface ResultsTableProps {
@@ -39,35 +43,84 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
 
   const displayList = activeTab === "qualified" ? qualifiedList : activeTab === "blocked" ? blockedList : disqualifiedList;
 
-  const handleExportCSV = () => {
+  const handleExportExcel = async () => {
     if (displayList.length === 0) return;
 
-    // Define CSV Headers
-    const headers = ["Company Name", "Website", "Status", "Confidence", "Phone", "Address", "Reason"];
+    // Dynamically import exceljs and file-saver
+    const ExcelJS = (await import('exceljs')).default;
+    const { saveAs } = (await import('file-saver')).default || await import('file-saver');
+
+    const workbook = new ExcelJS.Workbook();
     
-    // Create CSV Rows
-    const rows = displayList.map(c => {
-      return [
-        `"${c.company_name.replace(/"/g, '""')}"`,
-        `"${c.website}"`,
-        `"${c.qualification.qualified ? 'Qualified' : 'Disqualified'}"`,
-        `"${c.qualification.confidence}%"`,
-        `"${c.phone || ''}"`,
-        `"${(c.address || '').replace(/"/g, '""')}"`,
-        `"${c.qualification.reason.replace(/"/g, '""')}"`
-      ].join(",");
+    // --- SHEET 1: COMPANIES ---
+    const companiesSheet = workbook.addWorksheet('Companies');
+    companiesSheet.columns = [
+      { header: 'Company Name', key: 'company_name', width: 25 },
+      { header: 'Website', key: 'website', width: 30 },
+      { header: 'CRM Status', key: 'crm_status', width: 15 },
+      { header: 'Reason', key: 'reason', width: 60 }
+    ];
+
+    // Style Companies header
+    companiesSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    companiesSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF333333' } };
+
+    displayList.forEach((c, index) => {
+      const row = companiesSheet.addRow({
+        company_name: c.company_name,
+        website: c.website,
+        crm_status: activeTab === "qualified" ? (c.recruitly_id || "Add Company") : "N/A",
+        reason: c.qualification.reason
+      });
+      // Alternating row colors
+      if (index % 2 === 1) {
+        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+      }
     });
 
-    const csvContent = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    
-    link.setAttribute("href", url);
-    link.setAttribute("download", `company-intelligence-${activeTab}-results.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // --- SHEET 2: CONTACTS ---
+    const contactsSheet = workbook.addWorksheet('Contacts');
+    contactsSheet.columns = [
+      { header: 'Company Name', key: 'company_name', width: 25 },
+      { header: 'Contact Name', key: 'contact_name', width: 25 },
+      { header: 'Job Title', key: 'job_title', width: 35 },
+      { header: 'LinkedIn', key: 'linkedin', width: 40 },
+      { header: 'Reference ID', key: 'reference_id', width: 15 },
+      { header: 'CRM URL', key: 'crm_url', width: 40 }
+    ];
+
+    // Style Contacts header
+    contactsSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    contactsSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF333333' } };
+
+    // Group contacts by company with alternating colors (white and grey)
+    const colors = ['FFFFFFFF', 'FFF2F2F2']; 
+    let colorIndex = 0;
+
+    displayList.forEach(c => {
+      if (c.existing_contacts && c.existing_contacts.length > 0) {
+        const rowColor = colors[colorIndex % 2];
+        
+        c.existing_contacts.forEach(contact => {
+          const row = contactsSheet.addRow({
+            company_name: c.company_name,
+            contact_name: contact.name || "",
+            job_title: contact.job_title || "",
+            linkedin: contact.linkedin || "",
+            reference_id: contact.reference_id || "",
+            crm_url: contact.crm_url || ""
+          });
+          
+          row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowColor } };
+        });
+        colorIndex++;
+      }
+    });
+
+    // Generate Excel file
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `company_results_${activeTab}.xlsx`);
   };
 
   return (
@@ -123,19 +176,19 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
         {/* Export Button */}
         <div className="flex items-center px-4">
           <button 
-            onClick={handleExportCSV}
+            onClick={handleExportExcel}
             disabled={displayList.length === 0}
             className="flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download size={14} />
-            Export CSV
+            Export Excel
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="relative w-full">
         {/* Main List Table */}
-        <div className={`lg:col-span-2 glass-panel rounded-2xl overflow-hidden shadow-xl border border-white/5`}>
+        <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl border border-white/5 bg-zinc-950/40 backdrop-blur-md transition-all duration-300">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -144,6 +197,9 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                   <th className="px-4 py-3 font-semibold">Website</th>
                   {activeTab === "qualified" && (
                     <th className="px-4 py-3 font-semibold text-center">Confidence</th>
+                  )}
+                  {activeTab === "qualified" && (
+                    <th className="px-4 py-3 font-semibold text-center">CRM Status</th>
                   )}
                   <th className="px-4 py-3 font-semibold"></th>
                 </tr>
@@ -160,8 +216,10 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                     <tr
                       key={idx}
                       onClick={() => setSelectedCompany(company)}
-                      className={`hover:bg-white/[0.02] transition-colors cursor-pointer ${
-                        selectedCompany?.company_name === company.company_name ? "bg-white/[0.03]" : ""
+                      className={`group transition-all duration-200 cursor-pointer ${
+                        selectedCompany?.company_name === company.company_name 
+                          ? "bg-blue-900/10 border-l-2 border-blue-500 shadow-inner" 
+                          : "hover:bg-white/[0.03] border-l-2 border-transparent"
                       }`}
                     >
                       <td className="px-4 py-4.5 font-medium text-zinc-200">
@@ -192,6 +250,25 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                           </span>
                         </td>
                       )}
+                      {activeTab === "qualified" && (
+                        <td className="px-4 py-4.5 text-center">
+                          {company.recruitly_status === "EXISTS" ? (
+                            <span className="px-2.5 py-1 rounded bg-green-500/10 text-green-400 text-xs font-mono font-bold border border-green-500/20">
+                              {company.recruitly_id}
+                            </span>
+                          ) : company.recruitly_status === "FRESH" ? (
+                            <button className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold shadow-sm transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                console.log("Add Company clicked - Phase 2.1 UI only!");
+                              }}>
+                              Add Company
+                            </button>
+                          ) : (
+                            <span className="text-zinc-500 text-xs flex items-center justify-center h-full animate-pulse">...</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-4.5 text-right">
                         <ChevronRight size={16} className="text-zinc-600 inline" />
                       </td>
@@ -202,28 +279,35 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
             </table>
           </div>
         </div>
+      </div>
 
-        {/* Floating Details Drawer Side Panel */}
-        <div className="lg:col-span-1">
-          {selectedCompany ? (
-            <div className="glass-panel rounded-2xl p-5 border border-white/10 bg-zinc-950/40 space-y-5 shadow-2xl relative animate-slide-in">
+      {/* Slide-Out Details Drawer (Overlay) */}
+      <div 
+        className={`fixed inset-0 z-[100] transition-opacity duration-300 ${selectedCompany ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+      >
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedCompany(null)} />
+        
+        <div className={`absolute top-0 right-0 h-full w-full max-w-md bg-zinc-950/95 border-l border-white/10 shadow-2xl transform transition-transform duration-300 ease-out overflow-y-auto ${selectedCompany ? 'translate-x-0' : 'translate-x-full'}`}>
+          {selectedCompany && (
+            <div className="p-8 space-y-8 relative h-full">
+              {/* Close Button */}
               <button
                 onClick={() => setSelectedCompany(null)}
-                className="absolute top-4 right-4 p-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all"
+                className="absolute top-6 right-6 p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-all focus:outline-none focus:ring-2 focus:ring-white/20"
               >
-                <X size={16} />
+                <X size={20} />
               </button>
 
-              <div className="space-y-1 pr-12">
-                <h3 className="text-lg font-bold text-zinc-100 break-words">{selectedCompany.company_name}</h3>
+              <div className="space-y-2 pr-12 border-b border-white/5 pb-6">
+                <h3 className="text-2xl font-bold text-white tracking-tight">{selectedCompany.company_name}</h3>
                 <a
                   href={selectedCompany.website}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:underline inline-flex items-center gap-1"
+                  className="text-sm text-blue-400 hover:text-blue-300 hover:underline inline-flex items-center gap-1.5 transition-colors"
                 >
-                  <span>Visit website</span>
-                  <ExternalLink size={10} />
+                  <span className="font-medium">Visit official website</span>
+                  <ExternalLink size={12} />
                 </a>
               </div>
 
@@ -261,33 +345,62 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
                   {selectedCompany.qualification.reason}
                 </p>
               </div>
-
-              {/* Evidence Quotes */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Evidence Quotes</h4>
-                <div className="space-y-3">
-                  {selectedCompany.qualification.evidence.length === 0 ? (
-                    <p className="text-xs text-zinc-600 italic">No exact evidence quotes captured.</p>
-                  ) : (
-                    selectedCompany.qualification.evidence.map((ev, idx) => (
-                      <div key={idx} className="space-y-1.5 p-3 bg-blue-950/10 border border-blue-500/10 rounded-xl">
-                        <div className="flex items-center gap-1 text-[10px] text-blue-400 font-mono">
-                          <FileText size={10} />
-                          <span>Source: {ev.page}</span>
-                        </div>
-                        <p className="text-[11px] leading-relaxed text-zinc-300 italic">
-                          &ldquo;{ev.quote}&rdquo;
-                        </p>
-                      </div>
-                    ))
-                  )}
+              {/* CRM Status Box */}
+              {activeTab === "qualified" && selectedCompany.recruitly_status && (
+                <div className="mt-8 p-4 bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-500/20 rounded-xl flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">CRM Integration</h4>
+                    <p className="text-xs text-blue-200/60 mt-1">Status in Recruitly database</p>
+                  </div>
+                  <div>
+                    {selectedCompany.recruitly_status === "EXISTS" ? (
+                       <span className="px-3 py-1.5 rounded bg-emerald-500/20 text-emerald-400 text-sm font-mono font-bold border border-emerald-500/30 shadow-inner">
+                        {selectedCompany.recruitly_id}
+                      </span>
+                    ) : (
+                      <button className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-md shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log("Add Company clicked - UI ONLY Phase 2.2");
+                        }}>
+                        Add to Recruitly
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
-          ) : (
-            <div className="h-full min-h-[250px] border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center text-center p-6 text-zinc-600">
-              <ChevronRight className="rotate-90 lg:rotate-0 mb-1" size={24} />
-              <p className="text-xs">Select a company from the list to view qualification reasoning and evidence quotes.</p>
+              )}
+
+              {/* Existing Contacts */}
+              {selectedCompany.existing_contacts && selectedCompany.existing_contacts.length > 0 && (
+                <div className="space-y-3 mt-6">
+                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Existing Contacts in CRM ({selectedCompany.existing_contacts.length})</h4>
+                  <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                    {selectedCompany.existing_contacts.map((contact, i) => (
+                      <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-white/10 transition-colors">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-semibold text-zinc-200 text-sm">{contact.name}</div>
+                            <div className="text-xs text-zinc-400 mt-0.5">{contact.job_title}</div>
+                          </div>
+                          <div className="flex gap-2">
+                            {contact.linkedin && (
+                              <a href={contact.linkedin} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 transition-colors" title="LinkedIn Profile">
+                                <span className="text-[10px] uppercase font-bold border border-blue-400/30 px-1.5 py-0.5 rounded bg-blue-400/10">IN</span>
+                              </a>
+                            )}
+                            {contact.crm_url && (
+                              <a href={contact.crm_url} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 transition-colors" title="Open in CRM">
+                                <span className="text-[10px] uppercase font-bold border border-emerald-400/30 px-1.5 py-0.5 rounded bg-emerald-400/10">CRM</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
         </div>
