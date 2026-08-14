@@ -85,6 +85,7 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
       { header: 'Contact Name', key: 'contact_name', width: 25 },
       { header: 'Job Title', key: 'job_title', width: 35 },
       { header: 'LinkedIn', key: 'linkedin', width: 40 },
+      { header: 'Last Contacted', key: 'last_contacted', width: 25 },
       { header: 'Reference ID', key: 'reference_id', width: 15 },
       { header: 'CRM URL', key: 'crm_url', width: 40 }
     ];
@@ -107,6 +108,7 @@ export default function ResultsTable({ companies }: ResultsTableProps) {
             contact_name: contact.name || "",
             job_title: contact.job_title || "",
             linkedin: contact.linkedin || "",
+            last_contacted: contact.last_contacted || "",
             reference_id: contact.reference_id || "",
             crm_url: contact.crm_url || ""
           });
