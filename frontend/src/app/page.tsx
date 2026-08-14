@@ -134,12 +134,21 @@ export default function Home() {
         setCurrentStage("ai");
       } else if (type === "ai_qualified" || type === "ai_disqualified" || type === "ai_blocked") {
         setCurrentStage("ai");
-        // State is now managed automatically via Firebase onSnapshot listeners!
+        // Update local state directly from websocket for instant zero-latency UI
+        if (data && data.company) {
+          if (type === "ai_qualified") {
+            setQualifiedCompanies(prev => [...prev, data.company]);
+          } else {
+            setDisqualifiedCompanies(prev => [...prev, data.company]);
+          }
+        }
       } else if (type === "sheets_start") {
         setCurrentStage("sheets");
       } else if (type === "completed") {
         setCurrentStage("completed");
-        // Summary and final data is now fetched via Firebase onSnapshot listeners
+        if (data && data.summary) {
+          setSummary(data.summary);
+        }
         ws.close();
       } else if (type === "failed" || type === "error") {
         setCurrentStage("failed");
