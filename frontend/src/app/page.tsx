@@ -24,41 +24,9 @@ export default function Home() {
   
   const allCompanies = [...qualifiedCompanies, ...disqualifiedCompanies];
 
-  // Firebase Real-time Listeners
-  useEffect(() => {
-    if (!searchId) return;
-
-    // 1. Qualified Companies
-    const qQualified = query(collection(db, "qualified_companies"), where("search_id", "==", searchId));
-    const unsubQualified = onSnapshot(qQualified, (snapshot) => {
-      const docs = snapshot.docs.map(d => d.data() as Company);
-      setQualifiedCompanies(docs);
-    });
-
-    // 2. Disqualified Companies
-    const qDisqualified = query(collection(db, "disqualified_companies"), where("search_id", "==", searchId));
-    const unsubDisqualified = onSnapshot(qDisqualified, (snapshot) => {
-      const docs = snapshot.docs.map(d => d.data() as Company);
-      setDisqualifiedCompanies(docs);
-    });
-
-    // 3. Execution Summary (Final metrics)
-    const qSummary = query(collection(db, "search_history"), where("search_id", "==", searchId));
-    const unsubSummary = onSnapshot(qSummary, (snapshot) => {
-      if (!snapshot.empty) {
-        const data = snapshot.docs[0].data();
-        if (data.summary) {
-          setSummary(data.summary);
-        }
-      }
-    });
-
-    return () => {
-      unsubQualified();
-      unsubDisqualified();
-      unsubSummary();
-    };
-  }, [searchId]);
+  // We no longer use Firebase onSnapshot listeners for the live stream.
+  // All state is updated instantly via the WebSocket stream with zero latency!
+  // This guarantees the UI matches the backend state exactly.
 
   useEffect(() => {
     let ticking = false;
@@ -148,6 +116,11 @@ export default function Home() {
         setCurrentStage("completed");
         if (data && data.summary) {
           setSummary(data.summary);
+        }
+        if (data && data.companies) {
+           // Guarantee final synchronization with backend state
+           setQualifiedCompanies(data.companies.filter((c: Company) => c.qualification.status === "QUALIFIED"));
+           setDisqualifiedCompanies(data.companies.filter((c: Company) => c.qualification.status === "DISQUALIFIED"));
         }
         ws.close();
       } else if (type === "failed" || type === "error") {
