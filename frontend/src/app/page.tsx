@@ -33,7 +33,6 @@ export default function Home() {
     const unsubQualified = onSnapshot(qQualified, (snapshot) => {
       const docs = snapshot.docs.map(d => d.data() as Company);
       setQualifiedCompanies(docs);
-      if (docs.length > 0) setViewState("results");
     });
 
     // 2. Disqualified Companies
@@ -41,7 +40,6 @@ export default function Home() {
     const unsubDisqualified = onSnapshot(qDisqualified, (snapshot) => {
       const docs = snapshot.docs.map(d => d.data() as Company);
       setDisqualifiedCompanies(docs);
-      if (docs.length > 0) setViewState("results");
     });
 
     // 3. Execution Summary (Final metrics)
@@ -51,7 +49,6 @@ export default function Home() {
         const data = snapshot.docs[0].data();
         if (data.summary) {
           setSummary(data.summary);
-          setViewState("results");
         }
       }
     });
@@ -254,39 +251,33 @@ export default function Home() {
             )}
 
             <ProgressIndicator logs={logs} currentStage={currentStage} />
-          </div>
-        )}
-
-        {/* VIEW 3: Final Reports & Tables Dashboard */}
-        {viewState === "results" && (
-          <div className="space-y-8 w-full animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-              <div>
-                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                  <Layers className="text-blue-400" size={20} />
-                  <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
-                </h2>
-                <p className="text-xs text-zinc-500 mt-1">
-                  {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
-                </p>
-              </div>
-            </div>
-
-            {/* KPI Cards */}
-            {summary ? (
-              <ExecutionSummary summary={summary} searchId={searchId} />
-            ) : (
-              <div className="p-6 border border-blue-500/30 bg-blue-500/5 rounded-2xl flex items-center gap-4 animate-pulse">
-                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                <div>
-                  <h3 className="text-sm font-bold text-blue-400">AI Qualification in Progress...</h3>
-                  <p className="text-xs text-zinc-400">Companies will appear below as soon as they are evaluated. Final metrics will compile here once finished.</p>
+            
+            {/* Live Results Section */}
+            {(allCompanies.length > 0 || summary) && (
+              <div className="mt-12 space-y-8 w-full animate-fade-in border-t border-white/10 pt-12">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                      <Layers className="text-blue-400" size={20} />
+                      <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
+                    </h2>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
+                    </p>
+                  </div>
                 </div>
+
+                {/* KPI Cards */}
+                {summary && (
+                  <ExecutionSummary summary={summary} searchId={searchId} />
+                )}
+
+                {/* Split Tables tabbed list */}
+                {allCompanies.length > 0 && (
+                  <ResultsTable companies={allCompanies} />
+                )}
               </div>
             )}
-
-            {/* Split Tables tabbed list */}
-            <ResultsTable companies={allCompanies} />
           </div>
         )}
 
