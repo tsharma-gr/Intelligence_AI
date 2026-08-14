@@ -105,9 +105,15 @@ export default function Home() {
         // Update local state directly from websocket for instant zero-latency UI
         if (data && data.company) {
           if (type === "ai_qualified") {
-            setQualifiedCompanies(prev => [...prev, data.company]);
+            setQualifiedCompanies(prev => {
+              if (prev.some(c => c.company_name === data.company.company_name)) return prev;
+              return [...prev, data.company];
+            });
           } else {
-            setDisqualifiedCompanies(prev => [...prev, data.company]);
+            setDisqualifiedCompanies(prev => {
+              if (prev.some(c => c.company_name === data.company.company_name)) return prev;
+              return [...prev, data.company];
+            });
           }
         }
       } else if (type === "sheets_start") {
@@ -116,11 +122,6 @@ export default function Home() {
         setCurrentStage("completed");
         if (data && data.summary) {
           setSummary(data.summary);
-        }
-        if (data && data.companies) {
-           // Guarantee final synchronization with backend state
-           setQualifiedCompanies(data.companies.filter((c: Company) => c.qualification.status === "QUALIFIED"));
-           setDisqualifiedCompanies(data.companies.filter((c: Company) => c.qualification.status === "DISQUALIFIED"));
         }
         ws.close();
       } else if (type === "failed" || type === "error") {
