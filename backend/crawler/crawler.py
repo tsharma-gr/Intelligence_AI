@@ -33,48 +33,6 @@ class WebsiteCrawler:
             "Sec-Fetch-Site": "none",
         }
 
-    def triage_content(self, text: str, company_type: str) -> str:
-        """
-        Lightweight homepage triage heuristic (Phase 7).
-        Analyzes keyword density to avoid deep crawling when homepage is highly definitive.
-        """
-        text_lower = text.lower()
-        company_type_lower = company_type.lower()
-        
-        keywords = {
-            "manufacturer": ["manufactur", "factory", "production", "oem", "made in", "fabricat", "foundry", "workshop"],
-            "distributor": ["distributor", "dealer", "wholesaler", "stockist", "warehouse", "retailer", "merchant"],
-            "service": ["service", "consulting", "advisor", "agency", "repair", "maintenance", "installation"]
-        }
-        
-        scores = {}
-        for cat, words in keywords.items():
-            count = 0
-            for w in words:
-                count += text_lower.count(w)
-            scores[cat] = count
-            
-        target_cat = None
-        if "manufactur" in company_type_lower:
-            target_cat = "manufacturer"
-        elif any(x in company_type_lower for x in ["distributor", "dealer", "wholesaler", "supplier"]):
-            target_cat = "distributor"
-        elif any(x in company_type_lower for x in ["service", "consult", "advisor"]):
-            target_cat = "service"
-            
-        if not target_cat:
-            return "NEEDS_MORE_INFO"
-            
-        target_score = scores[target_cat]
-        other_scores = sum(scores[cat] for cat in scores if cat != target_cat)
-        
-        if target_score >= 4 and other_scores <= 1:
-            return "HIGH_CONFIDENCE_QUALIFIED"
-        if target_score == 0 and other_scores >= 5:
-            return "HIGH_CONFIDENCE_DISQUALIFIED"
-            
-        return "NEEDS_MORE_INFO"
-
     async def crawl_company(self, root_url: str, company_type: str = "", on_progress: Optional[callable] = None) -> List[CrawledPage]:
         """
         Crawls the company website starting at root_url.
@@ -117,18 +75,7 @@ class WebsiteCrawler:
         home_text = ContentExtractor.extract_clean_text(root_html)
         crawled_pages.append(CrawledPage(url=root_url, page_type="home", content=home_text))
 
-        # 2. Heuristic Triage Check (Adaptive Crawling - Milestone 3)
-        triage_decision = "NEEDS_MORE_INFO"
-        if company_type:
-            triage_decision = self.triage_content(home_text, company_type)
-            if triage_decision != "NEEDS_MORE_INFO":
-                if on_progress:
-                    await on_progress("status", f"Triage check: {triage_decision}. Skipping subpages.")
-                if self.cache and crawled_pages:
-                    self.cache.set(domain, crawled_pages)
-                return crawled_pages
-
-        # 3. Discover key subpages if triage needs more info
+        # 2. Discover key subpages to crawl
         discovered_links = WebsiteIndexer.discover_pages(root_url, root_html)
         tasks = []
         page_types = []
