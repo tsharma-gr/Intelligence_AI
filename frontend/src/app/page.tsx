@@ -1,18 +1,15 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Sparkles, Cpu, RefreshCw, Layers } from "lucide-react";
 import ChatInterface from "@/components/chat-interface";
 import ProgressIndicator, { LogEntry } from "@/components/progress-indicator";
-import ExecutionSummary from "@/components/execution-summary";
 import ResultsTable, { Company } from "@/components/results-table";
-import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
 
 type ViewState = "chat" | "discovery" | "results";
 
 export default function Home() {
-  const [viewState, setViewState] = useState<ViewState>("chat");
+  const [activeTab, setActiveTab] = useState<number>(0);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [searchId, setSearchId] = useState("");
   const [currentStage, setCurrentStage] = useState("query_gen");
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -20,41 +17,11 @@ export default function Home() {
   const [qualifiedCompanies, setQualifiedCompanies] = useState<Company[]>([]);
   const [disqualifiedCompanies, setDisqualifiedCompanies] = useState<Company[]>([]);
   const [sessionCriteria, setSessionCriteria] = useState<any>(null);
-  const headerRef = React.useRef<HTMLDivElement>(null);
   
   const allCompanies = [...qualifiedCompanies, ...disqualifiedCompanies];
 
-  // We no longer use Firebase onSnapshot listeners for the live stream.
-  // All state is updated instantly via the WebSocket stream with zero latency!
-  // This guarantees the UI matches the backend state exactly.
-
-  useEffect(() => {
-    let ticking = false;
-    const handleScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          const scrollY = window.scrollY;
-          if (headerRef.current) {
-            const opacity = Math.max(1 - scrollY / 250, 0);
-            const scale = Math.max(1 - scrollY / 800, 0.95);
-            const blur = Math.min(scrollY / 15, 10);
-            
-            headerRef.current.style.opacity = opacity.toString();
-            headerRef.current.style.transform = `scale(${scale})`;
-            headerRef.current.style.filter = `blur(${blur}px)`;
-            headerRef.current.style.pointerEvents = scrollY > 50 ? 'none' : 'auto';
-          }
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   const addLog = (type: string, message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false });
     setLogs((prev) => [...prev, { type, message, timestamp }]);
   };
 
@@ -65,12 +32,10 @@ export default function Home() {
     current_employer?: string | null;
   }) => {
     setSessionCriteria(criteria);
-    setViewState("discovery");
+    setActiveTab(1); // Switch to Live Pipeline view
     setLogs([]);
     setCurrentStage("query_gen");
 
-    // Establish WebSocket Connection
-    // Establish WebSocket Connection using exact production URL to prevent env var path bugs, or localhost in development
     let wsUrl = process.env.NODE_ENV === "development" ? "ws://127.0.0.1:8000/api/ws/discovery" : "wss://company-intelligence-backend.onrender.com/api/ws/discovery";
     if (process.env.NEXT_PUBLIC_API_URL) {
       wsUrl = process.env.NEXT_PUBLIC_API_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws/discovery";
@@ -79,7 +44,6 @@ export default function Home() {
 
     ws.onopen = () => {
       addLog("system", "Connected to discovery engine...");
-      // Send criteria payload
       ws.send(JSON.stringify(criteria));
     };
 
@@ -87,10 +51,8 @@ export default function Home() {
       const payload = JSON.parse(event.data);
       const { type, message, data } = payload;
 
-      // Add message to live logs
       addLog(type, message);
 
-      // Map progress updates to stages
       if (type === "query_gen") {
         setCurrentStage("query_gen");
         if (data.search_id) setSearchId(data.search_id);
@@ -102,7 +64,6 @@ export default function Home() {
         setCurrentStage("ai");
       } else if (type === "ai_qualified" || type === "ai_disqualified" || type === "ai_blocked") {
         setCurrentStage("ai");
-        // Update local state directly from websocket for instant zero-latency UI
         if (data && data.company) {
           if (type === "ai_qualified") {
             setQualifiedCompanies(prev => {
@@ -120,9 +81,7 @@ export default function Home() {
         setCurrentStage("sheets");
       } else if (type === "completed") {
         setCurrentStage("completed");
-        if (data && data.summary) {
-          setSummary(data.summary);
-        }
+        if (data && data.summary) setSummary(data.summary);
         ws.close();
       } else if (type === "failed" || type === "error") {
         setCurrentStage("failed");
@@ -138,139 +97,127 @@ export default function Home() {
 
     ws.onclose = () => {
       addLog("system", "WebSocket connection closed.");
-      // Ensure the UI stops spinning when the backend disconnects naturally
       setCurrentStage((prev) => (prev === "failed" ? "failed" : "completed"));
     };
   };
 
-  const handleReset = () => {
-    setViewState("chat");
-    setSessionCriteria(null);
-    setLogs([]);
-    setSummary(null);
-    setQualifiedCompanies([]);
-    setDisqualifiedCompanies([]);
-    setSearchId("");
-  };
+  // Determine active rail index
+  const activeRailIdx = currentStage === "query_gen" || currentStage === "search" ? 1 
+                      : currentStage === "crawl" || currentStage === "ai" ? 2 
+                      : currentStage === "completed" || currentStage === "sheets" ? 3 : 0;
 
   return (
-    <main className="cia-root flex flex-col relative pb-16" style={{ padding: 0 }}>
-      {/* Header */}
-      <div className="cia-header" style={{ padding: '16px 32px', borderBottom: '1px solid var(--border)', background: 'rgba(10, 11, 16, 0.8)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 50 }}>
-        <div className="cia-brand">
-          <div className="cia-mark">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 6.5V17.5L12 22L4 17.5V6.5L12 2Z" stroke="#cca35e" strokeWidth="1.4"/>
-              <circle cx="12" cy="12" r="3" stroke="#e8c37f" strokeWidth="1.4"/>
-            </svg>
-          </div>
-          <div className="cia-brand-text">
-            <div className="cia-title">Company Intelligence AI</div>
-            <div className="cia-eyebrow">Discovery &amp; Qualification</div>
+    <div className="app-shell">
+      {/* ============ SIDEBAR ============ */}
+      <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
+        <div className="sb-brand">
+          <div className="brand-mark">CI</div>
+          <div className="sb-brand-text">
+            <h1>Company Intelligence</h1>
+            <p>DISCOVERY &amp; QUALIFICATION</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {viewState !== "chat" && (
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-all cursor-pointer"
-            >
-              <RefreshCw size={12} />
-              <span style={{ fontFamily: 'var(--font-body)' }}>Start New Search</span>
-            </button>
-          )}
-          <div className="hidden sm:flex cia-agent-pill">
-            <span className="cia-dot-live"></span>
-            Active Agent
+        <div className="sb-scroll">
+          <div className="sb-section-label">Workspace</div>
+          <div className={`sb-item ${activeTab === 0 ? 'active' : ''}`} onClick={() => setActiveTab(0)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
+            <span className="sb-item-label">New Intake</span>
+          </div>
+          <div className={`sb-item ${activeTab === 1 ? 'active' : ''}`} onClick={() => setActiveTab(1)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span className="sb-item-label">Live Pipeline</span>
+            {currentStage !== "completed" && activeTab !== 1 && <span className="sb-item-count">1</span>}
+          </div>
+          <div className={`sb-item ${activeTab === 2 ? 'active' : ''}`} onClick={() => setActiveTab(2)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+            <span className="sb-item-label">Results</span>
+            {allCompanies.length > 0 && <span className="sb-item-count">{allCompanies.length}</span>}
+          </div>
+
+          <div className="sb-section-label">Records</div>
+          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"/></svg>
+            <span className="sb-item-label">Scan History</span>
+          </div>
+          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v4H4zM4 12h16v8H4z"/></svg>
+            <span className="sb-item-label">Saved Profiles</span>
+          </div>
+          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span className="sb-item-label">Pipeline (CRM)</span>
           </div>
         </div>
+
+        <div className="sb-footer">
+          <div className="sb-avatar">JD</div>
+          <div className="sb-footer-text">
+            <div className="name">J. Doe</div>
+            <div className="tier">PRO WORKSPACE</div>
+          </div>
+        </div>
+      </nav>
+      <div className="sb-collapse-btn" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} title="Collapse sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
       </div>
 
-      {/* Content Container */}
-      <section className="flex-1 flex flex-col p-4 md:p-8 max-w-5xl w-full mx-auto space-y-8 justify-center">
-        
-        {/* VIEW 1: Requirements Collection Dialogue */}
-        {viewState === "chat" && (
-          <div className="w-full flex flex-col gap-6 items-center">
-            <div 
-              ref={headerRef}
-              className="text-center max-w-lg mb-2"
-            >
-              <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-zinc-100 mb-2 font-display">
-                Company Discovery Engine
-              </h2>
-              <p className="text-xs md:text-sm text-zinc-400 leading-relaxed font-body">
-                Describe the company profile in the chat. The AI will interview you, generate queries, crawl websites, and perform automatic qualifications.
-              </p>
+      {/* ============ MAIN COLUMN ============ */}
+      <div className="main-col">
+        <header>
+          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: '16px' }}>Target Intake Protocol</div>
+          <div className="agent-badge"><span className="agent-dot"></span>Active Agent</div>
+        </header>
+
+        {activeTab <= 2 && (
+          <div className="scanrail-wrap" style={{ display: 'block' }}>
+            <div className="scanrail" id="scanrail">
+              {[
+                { label: "Auto-Detect", idx: 0 },
+                { label: "Search Google", idx: 1 },
+                { label: "AI Analysis", idx: 2 },
+                { label: "Results", idx: 3 }
+              ].map((step, i) => (
+                <React.Fragment key={i}>
+                  <div className={`rail-step ${activeRailIdx > i ? 'done' : activeRailIdx === i ? 'active' : ''}`}>
+                    <div className="rail-node"></div>
+                    <div className="rail-label">{step.label}</div>
+                  </div>
+                  {i < 3 && (
+                    <div className={`rail-line ${activeRailIdx > i ? 'filled' : ''}`}></div>
+                  )}
+                </React.Fragment>
+              ))}
             </div>
+          </div>
+        )}
+
+        <main>
+          {/* ============ VIEW 0: INTAKE ============ */}
+          <div className={`view ${activeTab === 0 ? 'active' : ''}`}>
             <ChatInterface onDiscoveryStart={handleDiscoveryStart} />
           </div>
-        )}
 
-        {/* VIEW 2: Real-time Discovery Tracker */}
-        {viewState === "discovery" && (
-          <div className="space-y-6 w-full py-4">
-            <div className="text-center max-w-md mx-auto space-y-3 mb-8">
-              <h2 className="text-2xl font-bold font-display" style={{ color: 'var(--text-primary)' }}>Running AI Discovery Pipeline</h2>
-              <p className="text-sm font-body leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                Searching Google for target criteria, crawling matches, extracting content, and auditing with DeepSeek.
-              </p>
-            </div>
-            
-            {/* Target criteria tag board */}
-            {sessionCriteria && (
-              <div className="flex flex-wrap justify-center gap-3 max-w-2xl mx-auto mb-6">
-                <span className="cia-version" style={{ fontSize: '11px' }}>
-                  <b style={{ color: 'var(--gold-bright)', marginRight: '6px' }}>TYPE:</b> {sessionCriteria.company_type}
-                </span>
-                <span className="cia-version" style={{ fontSize: '11px' }}>
-                  <b style={{ color: 'var(--gold-bright)', marginRight: '6px' }}>PRODUCT:</b> {sessionCriteria.product_or_service}
-                </span>
-                <span className="cia-version" style={{ fontSize: '11px' }}>
-                  <b style={{ color: 'var(--gold-bright)', marginRight: '6px' }}>LOCATION:</b> {sessionCriteria.location}
-                </span>
-              </div>
-            )}
-
-            <ProgressIndicator logs={logs} currentStage={currentStage} />
-            
-            {/* Live Results Section ALWAYS VISIBLE */}
-            <div className="mt-12 space-y-8 w-full animate-fade-in border-t border-white/10 pt-12">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-                <div>
-                  <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
-                    <Layers className="text-blue-400" size={20} />
-                    <span>Discovery Results {summary ? 'Summary' : '(Live Stream)'}</span>
-                  </h2>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    {summary ? 'Export complete. All logs and tables successfully stored in Google Sheets.' : 'Real-time AI qualification in progress...'}
-                  </p>
-                </div>
-              </div>
-
-              {/* KPI Cards */}
-              {summary && (
-                <ExecutionSummary summary={summary} searchId={searchId} />
-              )}
-
-              {/* Split Tables tabbed list */}
-              {allCompanies.length > 0 ? (
-                <ResultsTable companies={allCompanies} />
-              ) : (
-                <div className="p-12 text-center border border-white/5 rounded-2xl bg-white/5 flex flex-col items-center justify-center space-y-4">
-                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <div>
-                    <h3 className="text-sm font-bold text-blue-400">Waiting for AI Evaluations...</h3>
-                    <p className="text-xs text-zinc-400">Companies will appear in this table line-by-line as soon as they are processed.</p>
-                  </div>
-                </div>
-              )}
-            </div>
+          {/* ============ VIEW 1: LIVE PIPELINE ============ */}
+          <div className={`view ${activeTab === 1 ? 'active' : ''}`}>
+            <ProgressIndicator 
+              logs={logs} 
+              currentStage={currentStage} 
+              sessionCriteria={sessionCriteria}
+              allCompanies={allCompanies} 
+            />
           </div>
-        )}
 
-      </section>
-    </main>
+          {/* ============ VIEW 2: RESULTS ============ */}
+          <div className={`view ${activeTab === 2 ? 'active' : ''}`}>
+            <ResultsTable 
+              qualifiedCompanies={qualifiedCompanies} 
+              disqualifiedCompanies={disqualifiedCompanies} 
+              summary={summary}
+            />
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }
