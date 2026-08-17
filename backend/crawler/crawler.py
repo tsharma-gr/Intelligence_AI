@@ -76,7 +76,7 @@ class WebsiteCrawler:
         crawled_pages.append(CrawledPage(url=root_url, page_type="home", content=home_text))
 
         # 2. Discover key subpages to crawl
-        discovered_links = WebsiteIndexer.discover_pages(root_url, root_html)
+        discovered_links = await WebsiteIndexer.discover_pages(root_url, root_html)
         tasks = []
         page_types = []
         for ptype, url in discovered_links.items():
