@@ -81,6 +81,7 @@ class QualificationService:
             
             return Qualification(
                 qualified=bool(qual_data.get("qualified", False)),
+                is_blocked=bool(qual_data.get("is_blocked", False)),
                 reason=str(qual_data.get("reason", "No reason provided.")),
                 confidence=int(qual_data.get("confidence", 50)),
                 corrected_company_name=qual_data.get("corrected_company_name"),

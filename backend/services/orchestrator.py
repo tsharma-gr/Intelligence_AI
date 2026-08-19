@@ -14,7 +14,6 @@ from backend.services.qualification import QualificationService
 from backend.services.llm.base import token_usage, reset_token_usage
 from backend.api.config import settings
 from backend.services.job_manager import SearchJob, JobManager
-from backend.crawler.browser_pool import browser_pool
 
 # Milestone 2 Resiliency & Storage Imports
 from backend.services.storage import SQLiteJobStore, SQLiteResultStore
@@ -48,9 +47,6 @@ class CompanyDiscoveryOrchestrator:
         Main entry point for discovery. Creates a SearchJob and orchestrates
         fully decoupled streaming pipelines.
         """
-        # 1. Warm up browser pool if not initialized
-        await browser_pool.start()
-
         # 2. Create isolated SearchJob
         job = await self.job_manager.create_job(company_type, product_or_service, location)
         job.status = "running"
@@ -96,7 +92,7 @@ class CompanyDiscoveryOrchestrator:
                 job=job
             )
             query_gen_finished_time = time.time()
-            job.update_metrics("search_queries_generated", len(queries))
+            await job.update_metrics("search_queries_generated", len(queries))
             await self._send_progress(job.job_id, "query_gen_done", f"Generated {len(queries)} search variations", {"queries": queries})
 
             # ─────────────────────────────────────────────────────────────────
@@ -131,7 +127,7 @@ class CompanyDiscoveryOrchestrator:
                         logger.error(f"Search worker {worker_idx} failed for '{query}': {e}")
                 
                 # Finally block outside the semaphore so it executes when the worker completes
-                job.update_metrics("search_queries_completed", 1, add=True)
+                await job.update_metrics("search_queries_completed", 1, add=True)
 
             # Start search workers
             search_tasks = [
@@ -164,7 +160,7 @@ class CompanyDiscoveryOrchestrator:
                     async with candidates_lock:
                         if domain and domain not in unique_domains:
                             unique_domains.add(domain)
-                            job.update_metrics("unique_domains_found", len(unique_domains))
+                            await job.update_metrics("unique_domains_found", len(unique_domains))
                             await job.crawler_queue.put(item)
                     
                     if len(unique_domains) >= settings.max_unique_companies:
@@ -220,7 +216,7 @@ class CompanyDiscoveryOrchestrator:
                         )
                         crawl_duration = time.time() - crawl_start
                         
-                        job.update_metrics("crawled_count", 1, add=True)
+                        await job.update_metrics("crawled_count", 1, add=True)
                         
                         # Decide Priority Queue routing (Milestone 3 Priority AI Queue)
                         priority = 2
@@ -236,38 +232,16 @@ class CompanyDiscoveryOrchestrator:
                                 
                         # Increment counter to prevent SearchResult comparison TypeErrors
                         ai_queue_counter += 1
-                        await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
-                    except BotProtectionError as e:
-                        logger.warning(f"Bot protection blocked {candidate.website}. Attempting multi-tier fallbacks.")
                         
-                        fallback_success = False
-                        fallback_content = ""
-                        page_type = ""
-                        
-                        # Tier 1: Jina Reader API (With 3 Retries)
-                        for attempt in range(3):
-                            try:
-                                jina_api = f"https://r.jina.ai/{candidate.website}"
-                                async with httpx.AsyncClient() as client:
-                                    jina_resp = await client.get(jina_api, timeout=20)
-                                    if jina_resp.status_code == 200 and len(jina_resp.text) > 200:
-                                        fallback_content = jina_resp.text
-                                        page_type = "home (jina reader bypass)"
-                                        fallback_success = True
-                                        candidate.bypass_used = "Jina Reader"
-                                        logger.info(f"Successfully bypassed Cloudflare using Jina Reader for {candidate.website}")
-                                        break
-                                    elif jina_resp.status_code == 429:
-                                        logger.warning(f"Jina Reader rate limit hit (Attempt {attempt+1}/3). Retrying in {2*(attempt+1)}s...")
-                                        await asyncio.sleep(2 * (attempt + 1))
-                                    else:
-                                        break # If it's a 404 or other error, no need to retry
-                            except Exception as jina_err:
-                                logger.warning(f"Jina Reader fallback failed on attempt {attempt+1} for {candidate.website}: {jina_err}")
-                                await asyncio.sleep(2)
-
-                        # Tier 2: Wayback Machine
-                        if not fallback_success:
+                        if pages:
+                            await job.ai_queue.put((priority, ai_queue_counter, (candidate, pages)))
+                        else:
+                            logger.warning(f"Primary crawler failed for {candidate.website}. Attempting Wayback Machine fallback.")
+                            fallback_success = False
+                            fallback_content = ""
+                            page_type = ""
+                            
+                            # Tier 2: Wayback Machine
                             try:
                                 wayback_api = f"https://archive.org/wayback/available?url={candidate.website}"
                                 async with httpx.AsyncClient() as client:
@@ -286,29 +260,30 @@ class CompanyDiscoveryOrchestrator:
                             except Exception as wb_err:
                                 logger.warning(f"Wayback Machine fallback failed for {candidate.website}: {wb_err}")
                                 
-                        # Tier 3: Search Snippet Fallback
-                        if not fallback_success:
-                            logger.info(f"Heavy fallbacks failed. Falling back to search snippet for {candidate.website}")
-                            fallback_content = f"Website title: {candidate.title}\nGoogle Search Snippet: {candidate.snippet}\nNote: Website is protected by Cloudflare/Anti-Bot."
-                            page_type = "home (search snippet fallback)"
-                            candidate.is_blocked = True
+                            # Tier 3: Search Snippet Fallback
+                            if not fallback_success:
+                                logger.info(f"Heavy fallbacks failed. Falling back to search snippet for {candidate.website}")
+                                fallback_content = f"Website title: {candidate.title}\nGoogle Search Snippet: {candidate.snippet}\nNote: Website is protected by Cloudflare/Anti-Bot."
+                                page_type = "home (search snippet fallback)"
+                                candidate.is_blocked = True
 
-                        pages = [
-                            Page(
-                                url=candidate.website,
-                                page_type=page_type,
-                                content=fallback_content
-                            )
-                        ]
-                        job.update_metrics("crawled_count", 1, add=True)
-                        
-                        ai_queue_counter += 1
-                        # Push to AI queue with lowest priority (3)
-                        await job.ai_queue.put((3, ai_queue_counter, (candidate, pages)))
+                            from backend.crawler.models import CrawledPage
+                            fallback_pages = [
+                                CrawledPage(
+                                    url=candidate.website,
+                                    page_type=page_type,
+                                    content=fallback_content
+                                )
+                            ]
+                            await job.update_metrics("crawled_count", 1, add=True)
+                            
+                            ai_queue_counter += 1
+                            # Push to AI queue with lowest priority (3)
+                            await job.ai_queue.put((3, ai_queue_counter, (candidate, fallback_pages)))
                         
                     except Exception as e:
                         logger.error(f"Crawl worker {worker_id} failed on {candidate.website}: {e}")
-                        job.update_metrics("skipped_count", 1, add=True)
+                        await job.update_metrics("skipped_count", 1, add=True)
                     finally:
                         job.crawler_queue.task_done()
 
@@ -382,10 +357,10 @@ class CompanyDiscoveryOrchestrator:
                         job.results.append(company.model_dump())
                         
                         if not pages:
-                            job.update_metrics("skipped_count", 1, add=True)
+                            await job.update_metrics("skipped_count", 1, add=True)
                             await self._send_progress(job.job_id, "crawl_skip", f"{prefix}: Skipped (blocked or timeout)", {})
                         elif qualification.qualified:
-                            job.update_metrics("qualified_count", 1, add=True)
+                            await job.update_metrics("qualified_count", 1, add=True)
                             
                             # PHASE 2: Recruitly CRM Check
                             cy_result = await check_company_exists(company.company_name, company.website)
@@ -411,7 +386,7 @@ class CompanyDiscoveryOrchestrator:
                             
                             await self._send_progress(job.job_id, "ai_qualified", f"{prefix}: QUALIFIED ({qualification.confidence}% confidence)", {"company": company_dict})
                         else:
-                            job.update_metrics("disqualified_count", 1, add=True)
+                            await job.update_metrics("disqualified_count", 1, add=True)
                             company_dict = company.model_dump()
                             
                             # Save to Firebase Collection 2: Disqualified Companies
@@ -422,7 +397,7 @@ class CompanyDiscoveryOrchestrator:
                             
                     except Exception as e:
                         logger.error(f"AI Worker {worker_id} failed qualification for {candidate.company_name}: {e}")
-                        job.update_metrics("skipped_count", 1, add=True)
+                        await job.update_metrics("skipped_count", 1, add=True)
                     finally:
                         job.ai_queue.task_done()
 

@@ -50,9 +50,9 @@ class DeepSeekService(BaseLLMService):
 
             # Isolated SearchJob metrics (Milestone 4)
             if job:
-                job.update_metrics("prompt_tokens", p_tokens, add=True)
-                job.update_metrics("completion_tokens", c_tokens, add=True)
-                job.update_metrics("total_tokens", t_tokens, add=True)
-                job.update_metrics("call_count", 1, add=True)
+                await job.update_metrics("prompt_tokens", p_tokens, add=True)
+                await job.update_metrics("completion_tokens", c_tokens, add=True)
+                await job.update_metrics("total_tokens", t_tokens, add=True)
+                await job.update_metrics("call_count", 1, add=True)
 
             return data["choices"][0]["message"]["content"]

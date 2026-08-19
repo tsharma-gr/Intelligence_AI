@@ -18,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Company Intelligence AI",
+  title: "Lead Gen App",
   description: "AI-powered discovery and qualification platform based on search, crawlers, and AI content evaluation.",
 };
 

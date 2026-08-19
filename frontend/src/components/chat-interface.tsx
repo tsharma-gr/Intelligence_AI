@@ -27,11 +27,17 @@ const FileDropzone = ({ label, required, file, setFile, id, hint }: any) => {
       <label>{label} {required && <span className="req">*</span>}</label>
       <div 
         className="dropzone"
-        style={{ borderColor: isDragging ? 'var(--accent-gold)' : undefined, background: isDragging ? 'var(--accent-gold-soft)' : undefined }}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+        style={{ 
+          borderColor: isDragging ? 'var(--accent-gold)' : undefined, 
+          background: isDragging ? 'var(--accent-gold-soft)' : undefined,
+          position: 'relative'
+        }}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
         onDrop={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           setIsDragging(false);
           if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             setFile(e.dataTransfer.files[0]);
@@ -49,9 +55,20 @@ const FileDropzone = ({ label, required, file, setFile, id, hint }: any) => {
         </div>
         <div className="dz-text">
           {file ? (
-            <><b>{file.name}</b><span>{(file.size/1024).toFixed(0)} KB — uploaded</span></>
+            <>
+              <b>{file.name}</b>
+              <span>{(file.size/1024).toFixed(0)} KB — uploaded</span>
+              <div 
+                className="dz-remove" 
+                onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                title="Remove file"
+                style={{ position: 'absolute', top: '12px', right: '12px' }}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </div>
+            </>
           ) : (
-            <><b>Click to upload</b><span>{hint}</span></>
+            <><b>Click or drag to upload</b><span>{hint}</span></>
           )}
         </div>
       </div>
@@ -63,11 +80,7 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Welcome — upload the candidate's **CV**, any supporting notes, and their **current employer** to begin. I'll auto-detect their industry and build a matching company profile.",
-    },
-    {
-      role: "assistant",
-      content: "Once I detect the category, I'll show you the profile summary here for confirmation before running the search — you'll always get a chance to correct it."
+      content: "Welcome — upload the candidate's **CV**, any supporting notes, and their **current employer** to begin.\n\nI'll auto-detect their industry and build a matching company profile for your confirmation before running the search.",
     }
   ]);
   const [input, setInput] = useState("");
@@ -101,10 +114,13 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
       if (cvFile) formData.append("cv_file", cvFile);
       if (supportFile) formData.append("support_file", supportFile);
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api";
       
       const res = await fetch(`${apiUrl}/auto-detect`, {
         method: "POST",
+        headers: {
+          "X-API-Key": process.env.NEXT_PUBLIC_API_SECRET_KEY || "",
+        },
         body: formData,
       });
       
@@ -141,18 +157,16 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
     const newMessages = [...messages, { role: "user", content: userMessage } as Message];
     setMessages(newMessages);
     
-    if (userMessage.toLowerCase().trim() === "yes" || userMessage.toLowerCase().trim() === "confirm" || userMessage.toLowerCase().trim() === "y") {
-      setIsReady(true);
-      setMessages(prev => [...prev, { role: "assistant", content: "Great! Classification confirmed. Click 'Submit for Analysis' to begin." }]);
-      return;
-    }
-    
+    // Sending the message to the AI backend so it can dynamically interpret confirmation or edits
     setIsTyping(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000/api" : "https://company-intelligence-backend.onrender.com/api");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api";
       const res = await fetch(`${apiUrl}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "X-API-Key": process.env.NEXT_PUBLIC_API_SECRET_KEY || ""
+        },
         body: JSON.stringify({ messages: newMessages }),
       });
       const data = await res.json();
@@ -185,12 +199,28 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
   const canUpload = (cvFile || employerUrl) && !hasUploaded && !isTyping;
   const isFormComplete = isReady && extractedData.company_type;
 
+  const handleReset = () => {
+    setEmployerUrl("");
+    setCvFile(null);
+    setSupportFile(null);
+    setExtractedData({});
+    setIsReady(false);
+    setHasUploaded(false);
+    setInput("");
+    setMessages([
+      {
+        role: "assistant",
+        content: "Welcome — upload the candidate's **CV**, any supporting notes, and their **current employer** to begin.\n\nI'll auto-detect their industry and build a matching company profile for your confirmation before running the search.",
+      }
+    ]);
+  };
+
   return (
     <div className="grid">
       {/* CHAT PANEL */}
       <div className="panel">
         <div className="panel-head">
-          <div className="panel-title"><span className="live-dot"></span>Company Intelligence AI</div>
+          <div className="panel-title"><span className="live-dot"></span>Lead Gen App</div>
           <div className="pill">v2.0 · AUTO-DETECT</div>
         </div>
         <div className="chat-body">
@@ -211,7 +241,9 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
           {isTyping && (
             <div className="msg">
               <div className="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></div>
-              <div className="bubble"><span className="cursor" style={{marginLeft:0}}></span></div>
+              <div className="bubble">
+                <div className="typing-dots"><span></span><span></span><span></span></div>
+              </div>
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -220,12 +252,16 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
         {hasUploaded && !isReady && !isTyping && (
           <div className="quick-chips">
             <div className="chip" onClick={() => submitChatMessage("Yes, this classification is correct.")}>✅ Confirm classification</div>
-            <div className="chip" onClick={() => submitChatMessage("No, edit category")}>✏️ Edit category</div>
+            <div className="chip" onClick={() => {
+              setInput("Actually, please change it to: ");
+              document.getElementById('chat-input-field')?.focus();
+            }}>✏️ Edit category</div>
           </div>
         )}
         
         <div className="chat-input" style={{ opacity: (!hasUploaded) ? 0.5 : 1, pointerEvents: (!hasUploaded) ? 'none' : 'auto' }}>
           <input 
+            id="chat-input-field"
             type="text" 
             placeholder={!hasUploaded ? "Upload documents first..." : "Confirm with 'Yes' or describe an edit…"}
             value={input}
@@ -242,6 +278,10 @@ export default function ChatInterface({ onDiscoveryStart }: ChatInterfaceProps) 
       <div className="panel">
         <div className="panel-head">
           <div className="panel-title">Source Documents</div>
+          <button onClick={handleReset} className="reset-btn" title="Clear form and start over">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 11-3-7.7L21 8"/></svg>
+            Reset Form
+          </button>
         </div>
         <div className="form-body">
           <div className="field">

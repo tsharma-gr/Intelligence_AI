@@ -55,7 +55,7 @@ class GoogleSheetsService:
         try:
             spreadsheet_body = {
                 'properties': {
-                    'title': f"Company Intelligence Discoveries - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+                    'title': f"Lead Gen App Discoveries - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
                 },
                 'sheets': [
                     {'properties': {'title': 'Execution Summary'}},

@@ -8,6 +8,10 @@ env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(dotenv_path=env_path)
 
 import httpx
+import asyncio
+
+# Use a local asyncio Lock for rate limiting the Recruitly API across workers
+recruitly_api_lock = asyncio.Lock()
 
 async def check_company_exists(company_name: str, website: str) -> Optional[Tuple[str, str]]:
     """
@@ -46,17 +50,13 @@ async def check_company_exists(company_name: str, website: str) -> Optional[Tupl
     import asyncio
     import random
     
-    # Create a global semaphore to strictly limit concurrent requests to the Recruitly API to 5 at a time
-    if not hasattr(check_company_exists, "_semaphore"):
-        check_company_exists._semaphore = asyncio.Semaphore(5)
-    
     # Add a tiny random jitter to spread out requests
     await asyncio.sleep(random.uniform(0.1, 1.0))
     
     for attempt in range(3):
         try:
-            # Use the semaphore to ensure only 5 requests happen simultaneously
-            async with check_company_exists._semaphore:
+            # Use local asyncio lock to ensure rate limits are respected
+            async with recruitly_api_lock:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.get(url, params=params)
             
@@ -112,16 +112,13 @@ async def fetch_company_contacts(company_id: str) -> list:
     import asyncio
     import random
     
-    if not hasattr(fetch_company_contacts, "_semaphore"):
-        fetch_company_contacts._semaphore = asyncio.Semaphore(5)
-        
     await asyncio.sleep(random.uniform(0.1, 1.0))
     
     extracted_contacts = []
     
     for attempt in range(3):
         try:
-            async with fetch_company_contacts._semaphore:
+            async with recruitly_api_lock:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.get(url, params=params)
                     

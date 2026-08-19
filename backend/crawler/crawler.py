@@ -9,6 +9,7 @@ import httpx
 from backend.crawler.models import CrawledPage
 from backend.crawler.indexer import WebsiteIndexer
 from backend.crawler.extractor import ContentExtractor
+from backend.crawler.fetchers import HTTPXFetcher, JinaFetcher, PlaywrightFetcher
 from backend.cache.cache import DomainCache
 
 class BotProtectionError(Exception):
@@ -16,22 +17,31 @@ class BotProtectionError(Exception):
 
 logger = logging.getLogger("company_intelligence.crawler")
 
-_PLAYWRIGHT_AVAILABLE = os.environ.get("DISABLE_PLAYWRIGHT") != "true"
-
 class WebsiteCrawler:
     def __init__(self, use_cache: bool = True):
         self.cache = DomainCache() if use_cache else None
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-GB,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-        }
+        
+        # Initialize fetcher pipeline
+        self.httpx_fetcher = HTTPXFetcher()
+        self.jina_fetcher = JinaFetcher()
+        self.playwright_fetcher = PlaywrightFetcher()
+
+    def triage_content(self, content: str, company_type: str) -> str:
+        """
+        Fast keyword-based triage to determine if the page matches the company_type.
+        Returns: 'MATCH', 'NO_MATCH', or 'NEEDS_MORE_INFO'
+        """
+        if not company_type or not content:
+            return "NEEDS_MORE_INFO"
+            
+        content_lower = content.lower()
+        company_type_lower = company_type.lower()
+        
+        # Simple heuristic check
+        if company_type_lower in content_lower:
+            return "MATCH"
+            
+        return "NEEDS_MORE_INFO"
 
     async def crawl_company(self, root_url: str, company_type: str = "", on_progress: Optional[callable] = None) -> List[CrawledPage]:
         """
@@ -110,98 +120,48 @@ class WebsiteCrawler:
 
     async def _fetch_url(self, url: str) -> Optional[str]:
         """
-        Fetch URL content using a leased context from the BrowserPoolManager.
-        Falls back to HTTPX if Playwright is unavailable.
+        Fetch URL content with Graceful Degradation:
+        1. HTTPX (Fastest)
+        2. Jina AI (Smart fallback)
+        3. Playwright (Last resort, locked to 1 instance)
         """
-        # 1. HTTPX client (Lightweight fast path)
-        html = None
-        try:
-            async with httpx.AsyncClient(
-                headers=self.headers,
-                follow_redirects=True,
-                timeout=15.0,
-                http2=True
-            ) as client:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "").lower()
-                    if "text/html" in content_type or "text/plain" in content_type or not content_type:
-                        html = response.text
-                    else:
-                        logger.warning(f"HTTPX fetch returned non-HTML content-type '{content_type}' for '{url}'")
-                elif response.status_code in (301, 302, 303, 307, 308):
-                    location = response.headers.get("location", "")
-                    if location:
-                        response2 = await client.get(location)
-                        if response2.status_code == 200:
-                            content_type2 = response2.headers.get("content-type", "").lower()
-                            if "text/html" in content_type2 or "text/plain" in content_type2 or not content_type2:
-                                html = response2.text
-                            else:
-                                logger.warning(f"HTTPX redirect returned non-HTML content-type '{content_type2}' for '{location}'")
-                else:
-                    logger.warning(f"HTTP {response.status_code} for '{url}'")
-        except Exception as e:
-            logger.info(f"HTTPX fetch failed for '{url}': {e}")
-
-        # Heuristic check to see if we need Playwright fallback
-        needs_playwright = False
+        # Tier 1: HTTPX
+        html = await self.httpx_fetcher.fetch(url)
+        needs_fallback = False
+        
         if not html:
-            needs_playwright = True
+            needs_fallback = True
         else:
             clean_text = ContentExtractor.extract_clean_text(html)
             clean_text_lower = clean_text.lower()
             
-            # Check for Cloudflare/Bot protection immediately on HTTPX fast path
+            # Detect bot protection
             if any(hint in clean_text_lower for hint in ["just a moment", "verify you are human", "checking your browser", "enable javascript", "please enable js", "cloudflare", "attention required"]):
                 logger.warning(f"Bot protection detected on HTTPX fetch for '{url}'")
-                raise BotProtectionError(f"Bot protection active on {url}")
+                needs_fallback = True
                 
-            if len(clean_text) < 150:
-                logger.info(f"HTTPX returned empty or shell for '{url}', triggering Playwright fallback")
-                needs_playwright = True
+            # Detect JS shell
+            if not needs_fallback and len(clean_text) < 150:
+                logger.info(f"HTTPX returned empty or shell for '{url}', triggering fallback")
+                needs_fallback = True
 
-        if not needs_playwright:
+        if not needs_fallback:
             return html
 
-        # 2. Playwright: use shared browser pool context (Heavy fallback)
-        if _PLAYWRIGHT_AVAILABLE:
-            try:
-                from backend.crawler.browser_pool import browser_pool
-                async with browser_pool.lease_context() as context:
-                    page = await context.new_page()
+        # Tier 2: Jina AI
+        logger.info(f"Triggering Jina AI fallback for '{url}'")
+        jina_html = await self.jina_fetcher.fetch(url)
+        if jina_html:
+            return jina_html
 
-                    # Block heavy resources — images, fonts, CSS, ads (30-50% faster per page)
-                    async def _block_resources(route):
-                        if route.request.resource_type in ("image", "media", "font", "stylesheet", "other"):
-                            await route.abort()
-                        else:
-                            await route.continue_()
-
-                    await page.route("**/*", _block_resources)
-
-                    try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=8000)
-                        html = await page.content()
-                        
-                        # Post-render bot protection check
-                        if html:
-                            clean_pw_text = ContentExtractor.extract_clean_text(html).lower()
-                            if any(hint in clean_pw_text for hint in ["just a moment", "verify you are human", "checking your browser", "attention required"]):
-                                logger.warning(f"Bot protection detected on Playwright fetch for '{url}'")
-                                raise BotProtectionError(f"Bot protection active on {url}")
-                        
-                        return html
-                    finally:
-                        # Close only the page, the context remains active in the pool
-                        await page.close()
-
-            except BotProtectionError:
-                raise
-            except Exception as e:
-                logger.error(f"Playwright fallback fetch failed for '{url}': {e}")
-
-        return html
+        # Tier 3: Playwright (Last Resort)
+        logger.info(f"Jina AI failed or blocked. Triggering Playwright final fallback for '{url}'")
+        playwright_html = await self.playwright_fetcher.fetch(url)
+        if playwright_html:
+            return playwright_html
+            
+        logger.warning(f"All extraction tiers failed for '{url}'")
+        return None
 
     def _get_mock_pages(self, root_url: str, domain: str) -> Optional[List[CrawledPage]]:
         """Provides rich mock pages to enable offline testing."""

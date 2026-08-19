@@ -16,9 +16,10 @@ export default function Home() {
   const [summary, setSummary] = useState<any>(null);
   const [qualifiedCompanies, setQualifiedCompanies] = useState<Company[]>([]);
   const [disqualifiedCompanies, setDisqualifiedCompanies] = useState<Company[]>([]);
+  const [blockedCompanies, setBlockedCompanies] = useState<Company[]>([]);
   const [sessionCriteria, setSessionCriteria] = useState<any>(null);
   
-  const allCompanies = [...qualifiedCompanies, ...disqualifiedCompanies];
+  const allCompanies = [...qualifiedCompanies, ...disqualifiedCompanies, ...blockedCompanies];
 
   const addLog = (type: string, message: string) => {
     const timestamp = new Date().toLocaleTimeString([], { hour12: false });
@@ -34,13 +35,21 @@ export default function Home() {
     setSessionCriteria(criteria);
     setActiveTab(1); // Switch to Live Pipeline view
     setLogs([]);
+    setQualifiedCompanies([]);
+    setDisqualifiedCompanies([]);
+    setBlockedCompanies([]);
+    setSummary(null);
     setCurrentStage("query_gen");
 
-    let wsUrl = process.env.NODE_ENV === "development" ? "ws://127.0.0.1:8000/api/ws/discovery" : "wss://company-intelligence-backend.onrender.com/api/ws/discovery";
+    let hasAutoSwitched = false;
+
+    let wsUrl = "ws://127.0.0.1:8000/api/ws/discovery";
     if (process.env.NEXT_PUBLIC_API_URL) {
       wsUrl = process.env.NEXT_PUBLIC_API_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws/discovery";
     }
-    const ws = new WebSocket(wsUrl);
+    const apiKey = process.env.NEXT_PUBLIC_API_SECRET_KEY || "";
+    const wsUrlWithAuth = apiKey ? `${wsUrl}?api_key=${apiKey}` : wsUrl;
+    const ws = new WebSocket(wsUrlWithAuth);
 
     ws.onopen = () => {
       addLog("system", "Connected to discovery engine...");
@@ -49,6 +58,7 @@ export default function Home() {
 
     ws.onmessage = (event) => {
       const payload = JSON.parse(event.data);
+      if (payload.type === "ping") return;
       const { type, message, data } = payload;
 
       addLog(type, message);
@@ -64,9 +74,20 @@ export default function Home() {
         setCurrentStage("ai");
       } else if (type === "ai_qualified" || type === "ai_disqualified" || type === "ai_blocked") {
         setCurrentStage("ai");
+        
+        if (!hasAutoSwitched) {
+          setActiveTab(2); // Auto-switch to Results when the first result streams in!
+          hasAutoSwitched = true;
+        }
+
         if (data && data.company) {
           if (type === "ai_qualified") {
             setQualifiedCompanies(prev => {
+              if (prev.some(c => c.company_name === data.company.company_name)) return prev;
+              return [...prev, data.company];
+            });
+          } else if (type === "ai_blocked" || data.company.is_blocked || data.company.qualification?.is_blocked) {
+            setBlockedCompanies(prev => {
               if (prev.some(c => c.company_name === data.company.company_name)) return prev;
               return [...prev, data.company];
             });
@@ -81,6 +102,12 @@ export default function Home() {
         setCurrentStage("sheets");
       } else if (type === "completed") {
         setCurrentStage("completed");
+        
+        if (!hasAutoSwitched) {
+          setActiveTab(2); // Auto-switch to Results if it finishes (e.g. all blocked/failed)
+          hasAutoSwitched = true;
+        }
+
         if (data && data.summary) setSummary(data.summary);
         ws.close();
       } else if (type === "failed" || type === "error") {
@@ -101,19 +128,20 @@ export default function Home() {
     };
   };
 
-  // Determine active rail index
-  const activeRailIdx = currentStage === "query_gen" || currentStage === "search" ? 1 
-                      : currentStage === "crawl" || currentStage === "ai" ? 2 
-                      : currentStage === "completed" || currentStage === "sheets" ? 3 : 0;
+  // Determine active rail index dynamically based on both real-time stage AND active tab
+  const activeRailIdx = activeTab === 0 ? 0 
+                      : activeTab === 2 ? 3
+                      : (currentStage === "query_gen" || currentStage === "search" ? 1 
+                      : currentStage === "completed" || currentStage === "sheets" ? 3 : 2);
 
   return (
     <div className="app-shell">
       {/* ============ SIDEBAR ============ */}
       <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
         <div className="sb-brand">
-          <div className="brand-mark">CI</div>
+          <div className="brand-mark">LG</div>
           <div className="sb-brand-text">
-            <h1>Company Intelligence</h1>
+            <h1>Lead Gen App</h1>
             <p>DISCOVERY &amp; QUALIFICATION</p>
           </div>
         </div>
@@ -124,29 +152,40 @@ export default function Home() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
             <span className="sb-item-label">New Intake</span>
           </div>
-          <div className={`sb-item ${activeTab === 1 ? 'active' : ''}`} onClick={() => setActiveTab(1)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <div 
+            className={`sb-item ${activeTab === 1 ? 'active' : ''}`} 
+            onClick={() => { if (sessionCriteria) setActiveTab(1); }}
+            style={{ opacity: sessionCriteria ? 1 : 0.4, cursor: sessionCriteria ? 'pointer' : 'not-allowed' }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             <span className="sb-item-label">Live Pipeline</span>
-            {currentStage !== "completed" && activeTab !== 1 && <span className="sb-item-count">1</span>}
+            {activeTab === 1 && currentStage !== "completed" && currentStage !== "failed" && <span className="live-dot" style={{marginLeft:'auto'}}></span>}
           </div>
-          <div className={`sb-item ${activeTab === 2 ? 'active' : ''}`} onClick={() => setActiveTab(2)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+          <div 
+            className={`sb-item ${activeTab === 2 ? 'active' : ''}`} 
+            onClick={() => { if (sessionCriteria) setActiveTab(2); }}
+            style={{ opacity: sessionCriteria ? 1 : 0.4, cursor: sessionCriteria ? 'pointer' : 'not-allowed' }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
             <span className="sb-item-label">Results</span>
-            {allCompanies.length > 0 && <span className="sb-item-count">{allCompanies.length}</span>}
+            {allCompanies.length > 0 && <span className="sb-badge">{allCompanies.length}</span>}
           </div>
 
           <div className="sb-section-label">Records</div>
-          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+          <div className="sb-item">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"/></svg>
             <span className="sb-item-label">Scan History</span>
+            <span className="sb-badge-soon">SOON</span>
           </div>
-          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+          <div className="sb-item">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v4H4zM4 12h16v8H4z"/></svg>
             <span className="sb-item-label">Saved Profiles</span>
+            <span className="sb-badge-soon">SOON</span>
           </div>
-          <div className="sb-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon">
+          <div className="sb-item">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             <span className="sb-item-label">Pipeline (CRM)</span>
+            <span className="sb-badge-soon">SOON</span>
           </div>
         </div>
 
@@ -165,7 +204,9 @@ export default function Home() {
       {/* ============ MAIN COLUMN ============ */}
       <div className="main-col">
         <header>
-          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: '16px' }}>Target Intake Protocol</div>
+          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: '16px' }}>
+            {activeTab === 0 ? "Target Intake Protocol" : activeTab === 1 ? "Live Discovery Pipeline" : "Qualification Results"}
+          </div>
           <div className="agent-badge"><span className="agent-dot"></span>Active Agent</div>
         </header>
 
@@ -177,17 +218,30 @@ export default function Home() {
                 { label: "Search Google", idx: 1 },
                 { label: "AI Analysis", idx: 2 },
                 { label: "Results", idx: 3 }
-              ].map((step, i) => (
-                <React.Fragment key={i}>
-                  <div className={`rail-step ${activeRailIdx > i ? 'done' : activeRailIdx === i ? 'active' : ''}`}>
-                    <div className="rail-node"></div>
-                    <div className="rail-label">{step.label}</div>
-                  </div>
-                  {i < 3 && (
-                    <div className={`rail-line ${activeRailIdx > i ? 'filled' : ''}`}></div>
-                  )}
-                </React.Fragment>
-              ))}
+              ].map((step, i) => {
+                const isClickable = i === 0 || !!sessionCriteria;
+                const handleRailClick = () => {
+                  if (!isClickable) return;
+                  if (i === 0) setActiveTab(0);
+                  if (i === 1 || i === 2) setActiveTab(1);
+                  if (i === 3) setActiveTab(2);
+                };
+                return (
+                  <React.Fragment key={i}>
+                    <div 
+                      className={`rail-step ${activeRailIdx > i ? 'done' : activeRailIdx === i ? 'active' : ''}`}
+                      onClick={handleRailClick}
+                      style={{ cursor: isClickable ? 'pointer' : 'not-allowed' }}
+                    >
+                      <div className="rail-node"></div>
+                      <div className="rail-label">{step.label}</div>
+                    </div>
+                    {i < 3 && (
+                      <div className={`rail-line ${activeRailIdx > i ? 'filled' : ''}`}></div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </div>
           </div>
         )}
@@ -205,6 +259,7 @@ export default function Home() {
               currentStage={currentStage} 
               sessionCriteria={sessionCriteria}
               allCompanies={allCompanies} 
+              summary={summary}
             />
           </div>
 
@@ -213,6 +268,7 @@ export default function Home() {
             <ResultsTable 
               qualifiedCompanies={qualifiedCompanies} 
               disqualifiedCompanies={disqualifiedCompanies} 
+              blockedCompanies={blockedCompanies}
               summary={summary}
             />
           </div>

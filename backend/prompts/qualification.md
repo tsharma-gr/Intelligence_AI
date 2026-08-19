@@ -22,8 +22,9 @@ Instructions:
    - NO DIRECTORIES OR MAGAZINES: You MUST disqualify B2B directories, product search engines, advertising services, portals, news websites, and industry magazines (e.g. Yell, Barbour, Kompass, Professional Builders Merchant, Business and Industry Today). They are NOT the actual manufacturer/provider of the product, they just write about or list others.
    - If they perfectly match the Type, Product, and Location (including service area verification): "qualified": true.
    - If they fail ANY of the requirements (Type, Product, OR Location) or are a directory/magazine or violate the business model/geographic enforcement: "qualified": false.
+   - ANTI-BOT / CLOUDFLARE BLOCK: If the website content appears to be a Cloudflare challenge page (e.g. "Just a moment...", "Attention Required!", "Access denied"), an anti-bot check, or a completely blank/generic error page rather than a real business website, you MUST output "is_blocked": true and "qualified": false.
 2. Provide a clear reason explaining why they do or do not qualify.
-3. Assign a confidence score from 0 to 100 based on the strength of the evidence.
+3. Assign a confidence score from 0 to 100 based on the strength of the evidence. **CRITICAL: Do NOT just default to the example number.** Use a realistic scale (e.g., 100 for a perfect indisputable match, 85 for a likely match, 50 for uncertain, 10 for definitely not).
 4. Extract direct evidence quotes from the pages to justify your decision. You MUST provide at least one quote, even if disqualified (e.g. quote the text that proves they are something else). The quotes must match the text in the pages *exactly*.
 5. Extract the company's full physical address and phone number from the content. If not found, output null.
 6. Extract the TRUE, official company name from the website content (e.g. "Rosehill Drainage Ltd" instead of just "drainage"). This is critical.
@@ -33,8 +34,9 @@ Instructions:
 ```json
 {{
   "qualified": true,
+  "is_blocked": false,
   "reason": "Clear explanation of why the company matches or does not match.",
-  "confidence": 95,
+  "confidence": 85,
   "corrected_company_name": "True, official company name extracted from the text.",
   "official_website": "Official root website URL for the company, e.g. https://www.company.com",
   "address": "Full physical address, or null if not found",

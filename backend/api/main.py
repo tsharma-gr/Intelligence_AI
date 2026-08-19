@@ -5,7 +5,9 @@ import sys
 import asyncio
 import uuid
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form
+import os
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form, Depends, Security
+from fastapi.security.api_key import APIKeyHeader, APIKeyQuery
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sentry_sdk
@@ -21,7 +23,9 @@ if sys.platform == "win32":
 
 from backend.api.config import settings
 from backend.services.llm.factory import LLMFactory
+from backend.services.search.factory import SearchFactory
 from backend.services.orchestrator import CompanyDiscoveryOrchestrator
+from backend.services.auto_sector_classifier import classify
 from backend.prompts import load_prompt
 
 # Initialize Sentry
@@ -40,12 +44,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("company_intelligence")
+logger = logging.getLogger("lead_gen_app")
 
 app = FastAPI(
-    title="Company Intelligence AI API",
-    description="Backend API for AI-powered Company Discovery & Qualification Platform",
-    version="1.0.0"
+    title="Lead Gen App API",
+    description="Backend services for the Lead Gen App platform",
+    version="2.0.0"
 )
 
 # Add Rate Limiter Exception Handler
@@ -53,13 +57,30 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Enable CORS for Next.js frontend
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[frontend_url, "http://127.0.0.1:3000", "http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+async def get_api_key(
+    api_key_header: str = Security(api_key_header),
+    api_key_query: str = Security(api_key_query),
+):
+    expected_key = os.getenv("API_SECRET_KEY")
+    if not expected_key:
+        # If no key is set in backend, allow request (useful for local dev testing)
+        return None
+    if api_key_header == expected_key or api_key_query == expected_key:
+        return expected_key
+    raise HTTPException(status_code=403, detail="Could not validate API KEY")
 
 class ChatMessage(BaseModel):
     role: str  # 'user' or 'assistant'
@@ -80,15 +101,15 @@ def health_check():
 
 @app.post("/api/chat", response_model=ChatResponse)
 @limiter.limit("50/minute")
-async def chat_endpoint(request: Request, chat_req: ChatRequest):
+async def chat_endpoint(request: Request, chat_req: ChatRequest, api_key: str = Depends(get_api_key)):
     try:
         # Load the chat prompt template
         chat_prompt = load_prompt("chat.md")
         
         # Get the latest message and formatting history
         if not chat_req.messages:
-            welcome_text = "Welcome to Company Intelligence AI.\nI'll help you discover and qualify companies that match your requirements.\nLet's start by understanding what you're looking for.\n\nWhat type of company are you looking for?\nExamples:\n• Manufacturer\n• Distributor\n• Dealer\n• Service Provider"
-            return ChatResponse(content=welcome_text, ready=False)
+            welcome_text = "Welcome to Lead Gen App.\nI'll help you discover and qualify companies that match your requirements.\nLet's start by understanding what you're looking for.\n\nWhat type of company are you looking for?\nExamples:\n• Manufacturer\n• Distributor\n• Dealer\n• Service Provider"
+            return ChatResponse(content=welcome_text, extracted_data={}, ready=False)
             
         latest_message = chat_req.messages[-1].content
         history_msgs = chat_req.messages[:-1]
@@ -146,40 +167,82 @@ from backend.services.auto_sector_classifier import classify
 
 @app.post("/api/auto-detect")
 async def auto_detect_endpoint(
+    request: Request,
     employer_url: str = Form(""),
     cv_file: UploadFile = File(None),
-    support_file: UploadFile = File(None)
+    support_file: UploadFile = File(None),
+    api_key: str = Depends(get_api_key)
 ):
     try:
-        cv_text = ""
-        support_text = ""
-        
-        # Parse CV
-        if cv_file:
+        # Define async worker functions for parallel execution
+        async def parse_cv():
+            if not cv_file: return ""
+            cv_bytes = await cv_file.read()
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(cv_file.filename)[1]) as tmp:
-                tmp.write(await cv_file.read())
+                tmp.write(cv_bytes)
                 tmp_path = tmp.name
-            cv_text = extract_text_from_file(tmp_path)
-            os.remove(tmp_path)
-            
-        # Parse Support Doc
-        if support_file:
+            try:
+                return await asyncio.to_thread(extract_text_from_file, tmp_path)
+            finally:
+                os.remove(tmp_path)
+                
+        async def parse_support():
+            if not support_file: return ""
+            sup_bytes = await support_file.read()
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(support_file.filename)[1]) as tmp:
-                tmp.write(await support_file.read())
+                tmp.write(sup_bytes)
                 tmp_path = tmp.name
-            support_text = extract_text_from_file(tmp_path)
-            os.remove(tmp_path)
+            try:
+                return await asyncio.to_thread(extract_text_from_file, tmp_path)
+            finally:
+                os.remove(tmp_path)
+                
+        async def scrape_site():
+            if not employer_url: return ""
+            employer_url_clean = employer_url.strip()
+            target_url = None
             
-        # Scrape Website
-        website_text = ""
-        if employer_url:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            if " " not in employer_url_clean and "." in employer_url_clean:
+                target_url = employer_url_clean if employer_url_clean.startswith("http") else f"https://{employer_url_clean}"
+            else:
+                logger.info(f"'{employer_url_clean}' looks like a company name. Searching for official website...")
                 try:
-                    jina_res = await client.get(f"https://r.jina.ai/{employer_url}")
-                    if jina_res.status_code == 200:
-                        website_text = jina_res.text
+                    search_service = SearchFactory.get_service()
+                    results = await search_service.search(f"{employer_url_clean} official website company", num_results=1)
+                    if results and len(results) > 0:
+                        target_url = results[0].website
+                        logger.info(f"Resolved '{employer_url_clean}' to URL: {target_url}")
+                    else:
+                        logger.warning(f"Could not find a website for '{employer_url_clean}'")
                 except Exception as e:
-                    logger.error(f"Failed to scrape {employer_url}: {e}")
+                    logger.error(f"Search resolution failed: {e}")
+                    
+            if target_url:
+                for attempt in range(3):
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            jina_res = await client.get(f"https://r.jina.ai/{target_url}")
+                            if jina_res.status_code == 200:
+                                return jina_res.text
+                            elif jina_res.status_code == 429:
+                                await asyncio.sleep(2)
+                                continue
+                            else:
+                                logger.warning(f"Jina scrape failed with status {jina_res.status_code}")
+                                return ""
+                    except Exception as e:
+                        if attempt == 2:
+                            logger.error(f"Failed to scrape {target_url}: {e}")
+                        else:
+                            await asyncio.sleep(2)
+            return ""
+
+        # Execute all three tasks concurrently!
+        cv_text, support_text, website_text = await asyncio.gather(
+            parse_cv(), 
+            parse_support(), 
+            scrape_site()
+        )
                     
         # Run Rule-based Classifier
         classification = classify(
@@ -198,13 +261,13 @@ async def auto_detect_endpoint(
         Solution Type: {classification['solution_type']}
         Product Focus: {classification['product_focus'] if classification['product_focus'] else 'PLEASE DETERMINE FROM TEXT'}
         
-        Website Text: {website_text[:1500]}
-        CV Text: {cv_text[:1500]}
-        Support Notes: {support_text[:1500]}
+        Website Text: {website_text}
+        CV Text: {cv_text}
+        Support Notes: {support_text}
         
         Task:
         1. Write a short 3-line rationale explaining why this classification makes sense based on the texts.
-        2. Extract the target 'Location' from the CV and Notes (e.g., 'UK', 'London, UK'). If none is found, default to 'UK'.
+        2. Extract the target 'Location' from the CV and Notes. Format it specifically as "City, Country" or "Region, Country" (e.g., 'Portishead, UK', 'London, UK'). Be as specific as possible based on the candidate's area. If none is found, default to 'UK'.
         3. If the Subsector or Product Focus are 'PLEASE DETERMINE FROM TEXT', infer the most accurate 1-3 word description for them based on the text. If they are already filled out, just output them exactly as is.
         
         Output JSON only:
@@ -246,9 +309,25 @@ async def auto_detect_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/api/ws/discovery")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, api_key: str = None):
+    expected_key = os.getenv("API_SECRET_KEY")
+    if expected_key and api_key != expected_key:
+        await websocket.close(code=1008)
+        return
+        
     await websocket.accept()
     logger.info("WebSocket connection established for discovery task.")
+    
+    # Send ping every 15 seconds to prevent load balancer timeouts
+    async def keep_alive():
+        try:
+            while True:
+                await asyncio.sleep(15)
+                await websocket.send_text(json.dumps({"type": "ping", "message": "keep-alive"}))
+        except Exception:
+            pass
+
+    ping_task = asyncio.create_task(keep_alive())
     
     try:
         # Wait for initial configuration criteria from the frontend client
@@ -279,10 +358,10 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception as ex:
                 logger.error(f"Failed to push message over websocket: {ex}")
 
-        # Initialize orchestrator
+        # Initialize orchestrator        
+        # We start the orchestrator asynchronously, but since we are awaiting it,
+        # it blocks this handler until it finishes.
         orchestrator = CompanyDiscoveryOrchestrator(on_event=on_event)
-        
-        # Run pipeline
         await orchestrator.run_discovery(
             company_type=company_type,
             product_or_service=product_or_service,
@@ -291,17 +370,18 @@ async def websocket_endpoint(websocket: WebSocket):
         )
         
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected.")
+        logger.info("Client disconnected.")
     except Exception as e:
-        logger.exception("Error in discovery WebSocket channel")
+        logger.error(f"Error during discovery: {e}")
         try:
-            await websocket.send_json({
+            await websocket.send_text(json.dumps({
                 "type": "error",
-                "message": f"Orchestrator failed: {str(e)}"
-            })
+                "message": f"An internal error occurred: {str(e)}"
+            }))
         except Exception:
             pass
     finally:
+        ping_task.cancel()
         try:
             await websocket.close()
         except Exception:

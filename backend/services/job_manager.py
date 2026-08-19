@@ -59,6 +59,9 @@ class SearchJob:
         
         # Isolated final results list
         self.results: List[Dict[str, Any]] = []
+        
+        # Thread-safe metrics lock
+        self._metrics_lock = asyncio.Lock()
 
     def is_cancelled(self) -> bool:
         return self.cancel_event.is_set()
@@ -68,13 +71,14 @@ class SearchJob:
         self.status = "cancelled"
         logger.info(f"Job {self.job_id} has been requested to cancel.")
 
-    def update_metrics(self, key: str, value: Any, add: bool = False):
-        if key in self.metrics:
-            if add:
-                self.metrics[key] += value
-            else:
-                self.metrics[key] = value
-        self.metrics["duration_sec"] = datetime.utcnow().timestamp() - self.metrics["started_time"]
+    async def update_metrics(self, key: str, value: Any, add: bool = False):
+        async with self._metrics_lock:
+            if key in self.metrics:
+                if add:
+                    self.metrics[key] += value
+                else:
+                    self.metrics[key] = value
+            self.metrics["duration_sec"] = datetime.utcnow().timestamp() - self.metrics["started_time"]
 
 
 class JobManager:

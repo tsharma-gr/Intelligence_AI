@@ -13,9 +13,10 @@ interface ProgressIndicatorProps {
   currentStage: string;
   sessionCriteria: any;
   allCompanies: any[];
+  summary?: any;
 }
 
-export default function ProgressIndicator({ logs, currentStage, sessionCriteria, allCompanies }: ProgressIndicatorProps) {
+export default function ProgressIndicator({ logs, currentStage, sessionCriteria, allCompanies, summary }: ProgressIndicatorProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
@@ -28,22 +29,35 @@ export default function ProgressIndicator({ logs, currentStage, sessionCriteria,
   }, [logs]);
 
   // Elapsed timer
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
-    if (currentStage !== "query_gen" && currentStage !== "completed" && currentStage !== "failed") {
-      if (!timerInterval) {
-        const int = setInterval(() => setElapsed(prev => prev + 1), 1000);
-        setTimerInterval(int);
+    if (currentStage === "completed" || currentStage === "failed") {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-    } else if (currentStage === "completed" || currentStage === "failed") {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        setTimerInterval(null);
-      }
+      return;
     }
+    
+    if (currentStage !== "query_gen" && !timerRef.current) {
+      timerRef.current = setInterval(() => {
+        setElapsed(prev => prev + 1);
+      }, 1000);
+    }
+    
     return () => {
-      if (timerInterval) clearInterval(timerInterval);
+      // Don't cleanup the interval on re-render unless component unmounts
+      // We manage the cleanup manually when stage reaches completed/failed
     };
-  }, [currentStage, timerInterval]);
+  }, [currentStage]);
+
+  // Cleanup on unmount only
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   const formatElapsed = (sec: number) => {
     const mins = Math.floor(sec / 60);
@@ -81,7 +95,7 @@ export default function ProgressIndicator({ logs, currentStage, sessionCriteria,
         </div>
         <div className="scan-stat">
           <div className="l">Elapsed</div>
-          <div className="n">{formatElapsed(elapsed)}</div>
+          <div className="n">{summary?.duration ? summary.duration : formatElapsed(elapsed)}</div>
         </div>
       </div>
 
@@ -117,11 +131,39 @@ export default function ProgressIndicator({ logs, currentStage, sessionCriteria,
         <div className="panel">
           <div className="panel-head"><div className="panel-title">Profile Being Matched</div></div>
           <div className="form-body" style={{ gap: '14px' }}>
-            <div className="bubble" style={{ background: 'var(--bg-inset)' }}>
-              <b>Category:</b> {sessionCriteria?.company_type || 'Unknown'}<br />
-              <b>Product/Service:</b> {sessionCriteria?.product_or_service || 'Unknown'}<br />
-              <b>Region:</b> {sessionCriteria?.location || 'Unknown'}<br />
-              <b>Signal source:</b> CV + Employer Domain
+            <style dangerouslySetInnerHTML={{__html: `
+              .radar-wrap{ display:flex; align-items:center; justify-content:center; padding:20px 0 6px; }
+              .radar{ position:relative; width:150px; height:150px; }
+              .radar-ring{ position:absolute; border:1px solid var(--border, #21242D); border-radius:50%; }
+              .radar-ring.r1{ inset:0; }
+              .radar-ring.r2{ inset:20px; }
+              .radar-ring.r3{ inset:40px; }
+              .radar-ring.r4{ inset:60px; border-color: rgba(203,163,95,0.3); }
+              .radar-sweep{ position:absolute; inset:0; border-radius:50%; overflow:hidden; animation: sweep 3.2s linear infinite; }
+              .radar-sweep::before{ content:''; position:absolute; inset:0; background: conic-gradient(from 0deg, rgba(203,163,95,0.55), transparent 28%); }
+              @keyframes sweep{ to{ transform: rotate(360deg); } }
+              .radar-blip{ position:absolute; width:6px; height:6px; border-radius:50%; background:var(--accent-gold, #CBA35F); box-shadow:0 0 8px rgba(203,163,95,0.8); animation: blip-pulse 2s ease-in-out infinite; }
+              @keyframes blip-pulse{ 0%,100%{ opacity:.5; transform:scale(0.8);} 50%{ opacity:1; transform:scale(1.2);} }
+              .radar-center{ position:absolute; left:50%; top:50%; width:4px; height:4px; background:var(--accent-gold, #CBA35F); border-radius:50%; transform:translate(-50%,-50%); }
+            `}} />
+            <div className="radar-wrap">
+              <div className="radar">
+                <div className="radar-ring r1"></div>
+                <div className="radar-ring r2"></div>
+                <div className="radar-ring r3"></div>
+                <div className="radar-ring r4"></div>
+                <div className="radar-sweep"></div>
+                <div className="radar-center"></div>
+                <div className="radar-blip" style={{ top: '28%', left: '62%', animationDelay: '.2s' }}></div>
+                <div className="radar-blip" style={{ top: '65%', left: '34%', animationDelay: '.9s' }}></div>
+                <div className="radar-blip" style={{ top: '48%', left: '78%', animationDelay: '1.5s' }}></div>
+              </div>
+            </div>
+            <div className="bubble" style={{ background: 'var(--bg-inset)', color: '#FFFFFF' }}>
+              <b style={{ color: '#F0685C' }}>Category:</b> {sessionCriteria?.company_type || 'Unknown'}<br />
+              <b style={{ color: '#F0685C' }}>Product/Service:</b> {sessionCriteria?.product_or_service || 'Unknown'}<br />
+              <b style={{ color: '#F0685C' }}>Region:</b> {sessionCriteria?.location || 'Unknown'}<br />
+              <b style={{ color: '#F0685C' }}>Signal source:</b> CV + Employer Domain
             </div>
             <div className="progress-card" style={{ padding: 0, border: 'none', background: 'none', margin: 0 }}>
               <div className="progress-top"><span>Overall progress</span><b>{progressPercent}%</b></div>
